@@ -1,30 +1,38 @@
 import { Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { EventListener, VaultEvent } from "./event-listener";
 import { JobQueue } from "./job-queue";
-import { YakeLite } from "./keyphrase/yake-lite";
+import { CompromiseExtractor } from "./keyphrase/compromise-extractor";
+// import { YakeLite } from "./keyphrase/yake-lite";
+import { VaultContext } from "./types";
 
 export default class NexusPlugin extends Plugin {
   private eventListener!: EventListener;
   private jobQueue!: JobQueue;
-  private yakeLite!: YakeLite;
+  private extractor!: CompromiseExtractor;
+  // private yakeLite!: YakeLite;
 
   async onload() {
     console.log("Nexus: loading plugin");
 
-    this.yakeLite = new YakeLite();
+    this.extractor = new CompromiseExtractor();
+    // this.yakeLite = new YakeLite();
 
     this.jobQueue = new JobQueue(async (job) => {
       console.log(`Nexus: processing ${job.filePath} (${job.priority})`);
       const file = this.app.vault.getAbstractFileByPath(job.filePath);
       if (file instanceof TFile) {
         const content = await this.app.vault.cachedRead(file);
-        const phrases = this.yakeLite.extract(content);
+        const vaultContext: VaultContext = {
+          noteTitles: this.app.vault.getMarkdownFiles().map((f: TFile) => f.basename),
+        };
+        const phrases = this.extractor.extract(content, vaultContext);
         if (phrases.length > 0) {
-          console.log(`Nexus: keyphrases for "${job.filePath}":`);
+          console.log(`Nexus: keyphrases for "${job.filePath}" [compromise]:`);
           console.table(phrases.map(p => ({
             phrase: p.phrase,
             score: p.score.toFixed(3),
             offset: `${p.startOffset}:${p.endOffset}`,
+            extractor: "compromise",
           })));
         }
       }
