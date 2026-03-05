@@ -22,3 +22,12 @@ export interface CandidateEdge {
   similarity: number;
   approved?: boolean;
 }
+
+export interface VaultContext {
+  /** Lowercased term → number of notes containing the term. */
+  documentFrequencies?: Map<string, number>;
+  /** Total number of notes in the vault. */
+  totalDocuments?: number;
+  /** Existing note titles (basenames without .md), original casing. */
+  noteTitles?: string[];
+}
