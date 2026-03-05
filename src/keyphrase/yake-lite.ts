@@ -1,4 +1,4 @@
-import { ExtractedPhrase } from "../types";
+import { ExtractedPhrase, VaultContext } from "../types";
 import { preprocess, Sentence, Token } from "./preprocessing";
 import { STOPWORDS } from "./stopwords";
 
@@ -14,13 +14,19 @@ export interface YakeLiteOptions {
   topN?: number;
   /** Frequency dampening factor α (default 0.5). */
   frequencyDampening?: number;
+  /** Boost applied when a phrase matches an existing note title (default 5). */
+  noteMatchBoost?: number;
+  /** Boost applied to noun-phrase-shaped n-grams (default 4). */
+  nounPhraseBoost?: number;
 }
 
 const DEFAULTS: Required<YakeLiteOptions> = {
   maxNgramSize: 3,
   windowSize: 3,
-  topN: 20,
+  topN: Infinity,
   frequencyDampening: 0.5,
+  noteMatchBoost: 5,
+  nounPhraseBoost: 4,
 };
 
 /** Per-term statistics collected during the first pass. */
@@ -43,6 +49,79 @@ interface TermStats {
   rightTotal: number;
 }
 
+// ── Lightweight POS heuristics (suffix-based) ─────────────────
+
+const NOUN_SUFFIXES = [
+  "tion", "sion", "ment", "ness", "ity", "ence", "ance", "ism", "ist",
+  "ics", "ology", "phy", "dom", "ship", "ure", "age", "ery", "ium",
+  "sis", "oma", "oid", "ule", "ette",
+];
+
+const ADJ_SUFFIXES = [
+  "ical", "ial", "ful", "ous", "ive", "able", "ible", "less", "ular",
+  "ary", "ory", "ent", "ant", "ic", "al", "ed",
+];
+
+const VERB_SUFFIXES = [
+  "ize", "ise", "ify", "ate",
+];
+
+const ADVERB_SUFFIX = "ly";
+
+type PosGuess = "noun" | "adj" | "verb" | "adverb" | "unknown";
+
+function guessPOS(word: string): PosGuess {
+  const w = word.toLowerCase();
+
+  // Short words (<=3 chars) — don't guess by suffix
+  if (w.length <= 3) return "unknown";
+
+  // Adverb check first (before adj, since "ally" ends in "ly")
+  if (w.endsWith(ADVERB_SUFFIX) && w.length > 4) return "adverb";
+
+  // Gerunds/present participles ending in -ing: treat as noun (gerund) unless
+  // the word is very short, since "computing", "learning", etc. are noun-like
+  if (w.endsWith("ing") && w.length > 5) return "noun";
+
+  // Check verb suffixes before noun/adj (since some overlap)
+  for (const s of VERB_SUFFIXES) {
+    if (w.endsWith(s) && w.length > s.length + 2) return "verb";
+  }
+
+  for (const s of NOUN_SUFFIXES) {
+    if (w.endsWith(s)) return "noun";
+  }
+
+  for (const s of ADJ_SUFFIXES) {
+    if (w.endsWith(s)) return "adj";
+  }
+
+  // Capitalized words in the middle of a sentence are likely proper nouns
+  if (word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
+    return "noun";
+  }
+
+  return "unknown";
+}
+
+/**
+ * Check if an n-gram looks like a noun phrase: (adj|noun|unknown)* noun/unknown
+ * where the head (last non-stopword) must be noun-like or unknown,
+ * and no word is a verb or adverb.
+ */
+function isNounPhrase(words: string[]): boolean {
+  if (words.length === 0) return false;
+
+  for (let i = 0; i < words.length; i++) {
+    const pos = guessPOS(words[i]);
+    if (pos === "verb" || pos === "adverb") return false;
+  }
+
+  // Head word (last) should be noun or unknown (not adj-only)
+  const headPos = guessPOS(words[words.length - 1]);
+  return headPos === "noun" || headPos === "unknown";
+}
+
 /**
  * Lightweight YAKE keyphrase extractor tailored for Obsidian notes.
  *
@@ -60,8 +139,12 @@ export class YakeLite {
    * Extract keyphrases from Obsidian note content.
    * Returns phrases sorted by score (lower = more important),
    * with offsets pointing into the original content.
+   *
+   * When `vaultContext` is provided, TF-IDF distinctiveness and
+   * existing-note-match heuristics are applied. Structural boosts
+   * (title, heading, bold) are always applied.
    */
-  extract(content: string): ExtractedPhrase[] {
+  extract(content: string, vaultContext?: VaultContext): ExtractedPhrase[] {
     if (!content || !content.trim()) return [];
 
     const { sentences } = preprocess(content);
@@ -71,17 +154,38 @@ export class YakeLite {
     const stats = this.collectTermStats(sentences);
     if (stats.size === 0) return [];
 
-    // ── 2. Compute per-term YAKE scores (H) ──────────────────
+    // ── 2. Compute per-term structural boost (max across occurrences) ─
+    const structuralBoosts = this.collectStructuralBoosts(sentences);
+
+    // ── 3. Compute per-term YAKE scores (H) ──────────────────
     const termScores = this.computeTermScores(stats);
 
-    // ── 3. Generate and score n-grams ────────────────────────
-    const candidates = this.scoreNgrams(sentences, termScores, stats);
+    // ── 4. Generate and score n-grams ────────────────────────
+    const candidates = this.scoreNgrams(
+      sentences, termScores, stats, structuralBoosts, vaultContext,
+    );
 
-    // ── 4. Deduplicate overlapping candidates ────────────────
+    // ── 5. Deduplicate overlapping candidates ────────────────
     const deduped = this.deduplicateByOffset(candidates);
 
-    // ── 5. Normalize scores to [0, 1] and return top N ───────
+    // ── 6. Normalize scores to [0, 1] and return top N ───────
     return this.normalizeAndTruncate(deduped);
+  }
+
+  // ── Structural boost collection ──────────────────────────────
+
+  private collectStructuralBoosts(sentences: Sentence[]): Map<string, number> {
+    const boosts = new Map<string, number>();
+    for (const sentence of sentences) {
+      for (const token of sentence.tokens) {
+        if (STOPWORDS.has(token.lower)) continue;
+        const current = boosts.get(token.lower) ?? 0;
+        if (token.structuralBoost > current) {
+          boosts.set(token.lower, token.structuralBoost);
+        }
+      }
+    }
+    return boosts;
   }
 
   // ── Term statistics collection ─────────────────────────────
@@ -209,8 +313,28 @@ export class YakeLite {
     sentences: Sentence[],
     termScores: Map<string, number>,
     stats: Map<string, TermStats>,
+    structuralBoosts: Map<string, number>,
+    vaultContext?: VaultContext,
   ): ExtractedPhrase[] {
     const candidates: Map<string, ExtractedPhrase> = new Map();
+
+    // Pre-compute lowercased note titles for matching
+    const noteTitlesLower = vaultContext?.noteTitles?.map((t) => t.toLowerCase()) ?? [];
+
+    // Pre-compute max TF-IDF for normalization
+    let maxTfIdf = 0;
+    const tfidfCache = new Map<string, number>();
+    if (vaultContext?.documentFrequencies && vaultContext.totalDocuments) {
+      const { documentFrequencies, totalDocuments } = vaultContext;
+      for (const [term, s] of stats) {
+        const tf = s.tf;
+        const docFreq = documentFrequencies.get(term) ?? 0;
+        const idf = Math.log(totalDocuments / (1 + docFreq));
+        const tfidf = tf * idf;
+        tfidfCache.set(term, tfidf);
+        if (tfidf > maxTfIdf) maxTfIdf = tfidf;
+      }
+    }
 
     for (const sentence of sentences) {
       const tokens = sentence.tokens;
@@ -235,20 +359,59 @@ export class YakeLite {
           const startOffset = gram[0].startOffset;
           const endOffset = gram[gram.length - 1].endOffset;
 
-          // Compute n-gram score: S(kw) = ∏(H_i) / (TF_kw × (1 + ∑(H_i)))
+          // Compute n-gram score using geometric-mean normalization so
+          // multi-word phrases compete fairly with unigrams:
+          //   S(kw) = geomean(H_i) / (TF_kw × (1 + mean(H_i)))
           const constituentScores = gram
             .filter((t) => !STOPWORDS.has(t.lower))
             .map((t) => termScores.get(t.lower) ?? 1);
 
           if (constituentScores.length === 0) continue;
 
+          const k = constituentScores.length;
           const product = constituentScores.reduce((a, b) => a * b, 1);
-          const sum = constituentScores.reduce((a, b) => a + b, 0);
+          const geomean = Math.pow(product, 1 / k);
+          const mean = constituentScores.reduce((a, b) => a + b, 0) / k;
 
           // Count n-gram frequency across all sentences
           const ngramTF = this.countNgramFrequency(sentences, gram);
 
-          const score = product / (ngramTF * (1 + sum));
+          let rawScore = geomean / (ngramTF * (1 + mean));
+
+          // ── Heuristic boosts (applied as divisors) ───────────
+
+          // 1. Structural boost: max across constituent terms
+          let totalBoost = 0;
+          const nonStopGram = gram.filter((t) => !STOPWORDS.has(t.lower));
+          for (const t of nonStopGram) {
+            const sb = structuralBoosts.get(t.lower) ?? 0;
+            if (sb > totalBoost) totalBoost = sb;
+          }
+
+          // 2. TF-IDF boost (when vault context provided)
+          if (maxTfIdf > 0) {
+            let phraseMaxTfIdf = 0;
+            for (const t of nonStopGram) {
+              const v = tfidfCache.get(t.lower) ?? 0;
+              if (v > phraseMaxTfIdf) phraseMaxTfIdf = v;
+            }
+            // Normalize to [0, 1] range, then scale to a reasonable boost
+            totalBoost += (phraseMaxTfIdf / maxTfIdf) * 2;
+          }
+
+          // 3. Note match boost (when vault context provided)
+          if (noteTitlesLower.length > 0 && noteTitlesLower.includes(phraseLower)) {
+            totalBoost += this.opts.noteMatchBoost;
+          }
+
+          // 4. Noun phrase boost
+          const nonStopWords = nonStopGram.map((t) => t.original);
+          if (isNounPhrase(nonStopWords)) {
+            totalBoost += this.opts.nounPhraseBoost;
+          }
+
+          // Apply boosts: lower score = more important
+          const score = rawScore / (1 + totalBoost);
 
           // Keep best (lowest) score for each phrase
           const existing = candidates.get(phraseLower);

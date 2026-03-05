@@ -15,12 +15,86 @@ export interface Token {
   startOffset: number;
   /** Character offset (exclusive) in the original content. */
   endOffset: number;
+  /** Structural importance: 0 = body, 1 = bold, 2 = heading, 3 = title. */
+  structuralBoost: number;
+}
+
+/** A character range in the original content carrying a structural boost. */
+export interface StructuralRange {
+  start: number;
+  end: number;
+  boost: number;
 }
 
 /** A sentence is a list of tokens plus its index (0-based). */
 export interface Sentence {
   index: number;
   tokens: Token[];
+}
+
+// ── Structural detection ─────────────────────────────────────
+
+/**
+ * Scans original markdown content and returns character ranges that
+ * carry structural importance boosts:
+ * - First `# ` heading (title) → boost 3
+ * - `##`+ headings → boost 2
+ * - `**…**` bold spans → boost 1
+ */
+export function detectStructuralRanges(content: string): StructuralRange[] {
+  const ranges: StructuralRange[] = [];
+  let seenTitle = false;
+
+  const lines = content.split("\n");
+  let offset = 0;
+
+  for (const line of lines) {
+    const lineEnd = offset + line.length;
+
+    // Heading detection
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const textStart = offset + headingMatch[1].length + 1; // skip "# "
+      const textEnd = lineEnd;
+      if (level === 1 && !seenTitle) {
+        ranges.push({ start: textStart, end: textEnd, boost: 3 });
+        seenTitle = true;
+      } else {
+        ranges.push({ start: textStart, end: textEnd, boost: 2 });
+      }
+    }
+
+    // Bold detection within the line
+    const boldRe = /\*\*(.+?)\*\*/g;
+    let boldMatch: RegExpExecArray | null;
+    while ((boldMatch = boldRe.exec(line)) !== null) {
+      const boldStart = offset + boldMatch.index;
+      const boldEnd = boldStart + boldMatch[0].length;
+      ranges.push({ start: boldStart, end: boldEnd, boost: 1 });
+    }
+
+    offset = lineEnd + 1; // +1 for the \n
+  }
+
+  return ranges;
+}
+
+/**
+ * Returns the maximum structural boost for a character range in the original content.
+ */
+export function getBoostForRange(
+  start: number,
+  end: number,
+  ranges: StructuralRange[],
+): number {
+  let maxBoost = 0;
+  for (const r of ranges) {
+    if (start < r.end && end > r.start) {
+      maxBoost = Math.max(maxBoost, r.boost);
+    }
+  }
+  return maxBoost;
 }
 
 // ── Stripping ────────────────────────────────────────────────
@@ -190,6 +264,7 @@ export function tokenize(text: string, spanStart: number): Token[] {
       original: m[0],
       startOffset: spanStart + m.index,
       endOffset: spanStart + m.index + m[0].length,
+      structuralBoost: 0,
     });
   }
   return tokens;
@@ -207,7 +282,10 @@ export function tokenize(text: string, spanStart: number): Token[] {
 export function preprocess(content: string): {
   sentences: Sentence[];
   offsetMap: number[];
+  structuralRanges: StructuralRange[];
+  stripped: string;
 } {
+  const structuralRanges = detectStructuralRanges(content);
   const { stripped, offsetMap } = stripMarkdown(content);
   const sentenceSpans = splitSentences(stripped);
 
@@ -216,16 +294,21 @@ export function preprocess(content: string): {
     const rawTokens = tokenize(sentenceText, span.start);
 
     // Remap offsets from stripped-space to original-space
-    const tokens: Token[] = rawTokens.map((t) => ({
-      ...t,
-      startOffset: offsetMap[t.startOffset] ?? t.startOffset,
-      endOffset: offsetMap[t.endOffset - 1] !== undefined
+    const tokens: Token[] = rawTokens.map((t) => {
+      const origStart = offsetMap[t.startOffset] ?? t.startOffset;
+      const origEnd = offsetMap[t.endOffset - 1] !== undefined
         ? offsetMap[t.endOffset - 1] + 1
-        : t.endOffset,
-    }));
+        : t.endOffset;
+      return {
+        ...t,
+        startOffset: origStart,
+        endOffset: origEnd,
+        structuralBoost: getBoostForRange(origStart, origEnd, structuralRanges),
+      };
+    });
 
     return { index: idx, tokens };
   });
 
-  return { sentences, offsetMap };
+  return { sentences, offsetMap, structuralRanges, stripped };
 }
