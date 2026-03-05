@@ -10,6 +10,9 @@
   },
   "author": "Tony Wang",
   "license": "MIT",
+  "dependencies": {
+    "compromise": "^14.14.3"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
