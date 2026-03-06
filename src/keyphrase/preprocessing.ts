@@ -122,49 +122,47 @@ export function stripMarkdown(content: string): { stripped: string; offsetMap: n
   // Each replacement returns the text to keep and the offset within the
   // full match where that kept text starts (so offset mapping is accurate).
   const replacements: Array<{
-    pattern: RegExp;
+    anchored: RegExp;
     replace: (match: RegExpMatchArray) => { text: string; offsetInMatch: number };
   }> = [
     // YAML frontmatter (only at very start)
-    { pattern: /^---\n[\s\S]*?\n---\n?/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:^---\n[\s\S]*?\n---\n?)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Fenced code blocks
-    { pattern: /^```[\s\S]*?```/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:^```[\s\S]*?```)/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Inline code
-    { pattern: /`[^`\n]+`/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:`[^`\n]+`)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Images
-    { pattern: /!\[[^\]]*\]\([^)]*\)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:!\[[^\]]*\]\([^)]*\))/, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Wikilinks with alias [[target|display]]
     {
-      pattern: /\[\[([^\]|]+)\|([^\]]+)\]\]/,
+      anchored: /^(?:\[\[([^\]|]+)\|([^\]]+)\]\])/,
       replace: (m) => ({ text: m[2], offsetInMatch: m[0].indexOf(m[2]) }),
     },
     // Wikilinks plain [[target]]
     {
-      pattern: /\[\[([^\]]+)\]\]/,
+      anchored: /^(?:\[\[([^\]]+)\]\])/,
       replace: (m) => ({ text: m[1], offsetInMatch: 2 }), // skip [[
     },
     // Markdown links [text](url)
     {
-      pattern: /\[([^\]]*)\]\([^)]*\)/,
+      anchored: /^(?:\[([^\]]*)\]\([^)]*\))/,
       replace: (m) => ({ text: m[1], offsetInMatch: 1 }), // skip [
     },
     // HTML tags
-    { pattern: /<[^>]+>/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:<[^>]+>)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Bare URLs
-    { pattern: /https?:\/\/[^\s)]+/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:https?:\/\/[^\s)]+)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Heading markers (start of line)
-    { pattern: /^#{1,6}\s/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:#{1,6}\s)/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
     // Bold/italic markers
-    { pattern: /(\*{1,3}|_{1,2})/, replace: () => ({ text: "", offsetInMatch: 0 }) },
+    { anchored: /^(?:\*{1,3}|_{1,2})/, replace: () => ({ text: "", offsetInMatch: 0 }) },
   ];
 
   let i = 0;
   outer: while (i < content.length) {
     // Try each pattern at the current position
     const remaining = content.slice(i);
-    for (const { pattern, replace } of replacements) {
-      // Only match at the start of remaining
-      const anchored = new RegExp("^(?:" + pattern.source + ")", pattern.flags);
+    for (const { anchored, replace } of replacements) {
       const m = remaining.match(anchored);
       if (m && m.index === 0) {
         const { text: replacementText, offsetInMatch } = replace(m);
