@@ -1,4 +1,4 @@
-export type JobType = "process" | "reindex";
+export type JobType = "process";
 
 export interface QueueJob {
   filePath: string;
@@ -24,10 +24,6 @@ export interface CandidateEdge {
 }
 
 export interface VaultContext {
-  /** Lowercased term → number of notes containing the term. */
-  documentFrequencies?: Map<string, number>;
-  /** Total number of notes in the vault. */
-  totalDocuments?: number;
   /** Existing note titles (basenames without .md), original casing. */
   noteTitles?: string[];
 }
