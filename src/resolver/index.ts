@@ -89,6 +89,7 @@ export class AliasResolver {
             phrase,
             targetPath: title,
             similarity,
+            matchType: "deterministic",
           });
         }
       }
