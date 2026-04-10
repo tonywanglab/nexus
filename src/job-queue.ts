@@ -76,6 +76,9 @@ export class JobQueue {
     }
     this.pending.clear();
     for (const { job } of entries) {
+      const last = this.lastProcessed.get(job.filePath) ?? 0;
+      if (Date.now() - last < this.cooldownMs) continue;
+      this.lastProcessed.set(job.filePath, Date.now());
       this.onProcess(job);
     }
   }
