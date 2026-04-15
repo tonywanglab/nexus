@@ -24,10 +24,10 @@ export interface CandidateEdge {
 }
 
 export interface VaultContext {
+  /** Lowercased term → number of notes containing the term. */
+  documentFrequencies?: Map<string, number>;
+  /** Total number of notes in the vault. */
+  totalDocuments?: number;
   /** Existing note titles (basenames without .md), original casing. */
   noteTitles?: string[];
-  /** Per-term document frequency map (term → number of documents containing it). */
-  documentFrequencies?: Map<string, number>;
-  /** Total number of documents in the vault. */
-  totalDocuments?: number;
 }

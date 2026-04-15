@@ -23,7 +23,7 @@ export interface YakeLiteOptions {
 const DEFAULTS: Required<YakeLiteOptions> = {
   maxNgramSize: 10,
   windowSize: 3,
-  topN: 200,
+  topN: Infinity,
   frequencyDampening: 0.5,
   noteMatchBoost: 5,
   nounPhraseBoost: 4,
