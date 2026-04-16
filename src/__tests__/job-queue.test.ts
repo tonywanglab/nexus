@@ -209,6 +209,19 @@ describe("JobQueue", () => {
       queue.flush();
       expect(onProcess).not.toHaveBeenCalled();
     });
+
+    it("flush runs pending jobs even when the same path is under cooldown", () => {
+      const { onProcess, queue } = setup({ cooldownMs: 2000 });
+      queue.enqueue("a.md", "process");
+      jest.advanceTimersByTime(500);
+      expect(onProcess).toHaveBeenCalledTimes(1);
+      queue.enqueue("a.md", "reindex");
+      queue.flush();
+      expect(onProcess).toHaveBeenCalledTimes(2);
+      expect(onProcess).toHaveBeenLastCalledWith(
+        expect.objectContaining({ filePath: "a.md", type: "reindex" })
+      );
+    });
   });
 
   // ─── clear ────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { ExtractedPhrase, VaultContext } from "../types";
 import { preprocess, Sentence, Token } from "./preprocessing";
+import { normalizeScores } from "./scoring";
 import { STOPWORDS } from "./stopwords";
 
 /**
@@ -169,7 +170,7 @@ export class YakeLite {
     const deduped = this.deduplicateByOffset(candidates);
 
     // ── 6. Normalize scores to [0, 1] and return top N ───────
-    return this.normalizeAndTruncate(deduped);
+    return normalizeScores(deduped, this.opts.topN);
   }
 
   // ── Structural boost collection ──────────────────────────────
@@ -479,28 +480,6 @@ export class YakeLite {
     }
 
     return result;
-  }
-
-  // ── Normalization ──────────────────────────────────────────
-
-  private normalizeAndTruncate(candidates: ExtractedPhrase[]): ExtractedPhrase[] {
-    if (candidates.length === 0) return [];
-
-    // Sort by score ascending (lower = more important)
-    const sorted = [...candidates].sort((a, b) => a.score - b.score);
-    const topN = sorted.slice(0, this.opts.topN);
-
-    if (topN.length === 0) return [];
-
-    const minScore = topN[0].score;
-    const maxScore = topN[topN.length - 1].score;
-    const range = maxScore - minScore;
-
-    return topN.map((p) => ({
-      ...p,
-      score: range > 0 ? (p.score - minScore) / range : 0,
-      spanId: `${p.startOffset}:${p.endOffset}`,
-    }));
   }
 
   // ── Utilities ──────────────────────────────────────────────
