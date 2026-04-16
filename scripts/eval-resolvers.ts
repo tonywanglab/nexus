@@ -1,11 +1,17 @@
 #!/usr/bin/env npx ts-node
 /**
- * Standalone evaluation script for both deterministic (LCS) and stochastic (embedding) resolvers.
+ * Standalone evaluation script for extractor × resolver combinations.
  *
  * Runs outside Jest to avoid ONNX/VM sandbox incompatibility.
  *
  * Usage:
- *   npx ts-node scripts/eval-resolvers.ts
+ *   npm run eval                                    # all 6 combos
+ *   npm run eval -- --extractor=span                # SpanExtractor × all resolvers
+ *   npm run eval -- --resolver=lcs                  # all extractors × LCS
+ *   npm run eval -- --extractor=yake --resolver=lcs # single combo
+ *
+ * Extractor values: span, yake, all (default: all)
+ * Resolver values:  lcs, arctic, gemma, all (default: all)
  */
 
 import * as fs from "fs";
@@ -419,7 +425,24 @@ function printWorstRecall(result: AggregateResult, n = 10): void {
 
 // ── Main ────────────────────────────────────────────────────────
 
+// ── CLI argument parsing ────────────────────────────────────────
+
+function parseArgs(): { extractor: string; resolver: string } {
+  let extractor = "all";
+  let resolver = "all";
+  for (const arg of process.argv.slice(2)) {
+    const match = arg.match(/^--(\w+)=(\w+)$/);
+    if (match) {
+      if (match[1] === "extractor") extractor = match[2].toLowerCase();
+      if (match[1] === "resolver") resolver = match[2].toLowerCase();
+    }
+  }
+  return { extractor, resolver };
+}
+
 async function main(): Promise<void> {
+  const args = parseArgs();
+
   const VAULT_DIR = path.resolve(__dirname, "../senior-thesis-vault");
   if (!fs.existsSync(VAULT_DIR)) {
     console.error(`Vault not found at ${VAULT_DIR}`);
@@ -438,33 +461,62 @@ async function main(): Promise<void> {
   const yakeLite = new YakeLite();
   const yakeExtractFn = (content: string, ctx: VaultContext) => yakeLite.extract(content, ctx);
 
-  const extractors = [
-    { name: "SpanExtractor", fn: spanExtractFn },
-    { name: "YakeLite", fn: yakeExtractFn },
+  const allExtractors = [
+    { key: "span", name: "SpanExtractor", fn: spanExtractFn },
+    { key: "yake", name: "YakeLite", fn: yakeExtractFn },
   ];
 
-  // ── Resolvers ──
+  const extractors = args.extractor === "all"
+    ? allExtractors
+    : allExtractors.filter((e) => e.key === args.extractor);
+
+  if (extractors.length === 0) {
+    console.error(`Unknown extractor: "${args.extractor}". Use: span, yake, all`);
+    process.exit(1);
+  }
+
+  // ── Resolvers (only instantiate what's needed) ──
   const deterministicResolver = new AliasResolver();
 
-  const arcticProvider = new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
-  const arcticResolver = new EmbeddingResolver({
-    embeddingProvider: arcticProvider,
-    similarityThreshold: 0.95,
-  });
+  let arcticProvider: PipelineEmbeddingProvider | null = null;
+  let arcticResolver: EmbeddingResolver | null = null;
+  let gemmaProvider: GemmaEmbeddingProvider | null = null;
+  let gemmaResolver: EmbeddingResolver | null = null;
 
-  const gemmaProvider = new GemmaEmbeddingProvider("onnx-community/embeddinggemma-300m-ONNX", 768, "q4");
-  const gemmaResolver = new EmbeddingResolver({
-    embeddingProvider: gemmaProvider,
-    similarityThreshold: 0.95,
-  });
+  if (args.resolver === "all" || args.resolver === "arctic") {
+    arcticProvider = new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
+    arcticResolver = new EmbeddingResolver({
+      embeddingProvider: arcticProvider,
+      similarityThreshold: 0.95,
+    });
+  }
 
-  const resolvers = [
-    { name: "LCS", fn: (p: ExtractedPhrase[], t: string[], s: string) => deterministicResolver.resolve(p, t, s) },
-    { name: "Arctic-xs (384d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => arcticResolver.resolve(p, t, s) },
-    { name: "Gemma-300m q4 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver.resolve(p, t, s) },
+  if (args.resolver === "all" || args.resolver === "gemma") {
+    gemmaProvider = new GemmaEmbeddingProvider("onnx-community/embeddinggemma-300m-ONNX", 768, "q4");
+    gemmaResolver = new EmbeddingResolver({
+      embeddingProvider: gemmaProvider,
+      similarityThreshold: 0.95,
+    });
+  }
+
+  const allResolvers = [
+    { key: "lcs", name: "LCS", fn: (p: ExtractedPhrase[], t: string[], s: string) => deterministicResolver.resolve(p, t, s) },
+    ...(arcticResolver ? [{ key: "arctic", name: "Arctic-xs (384d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => arcticResolver!.resolve(p, t, s) }] : []),
+    ...(gemmaResolver ? [{ key: "gemma", name: "Gemma-300m q4 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver!.resolve(p, t, s) }] : []),
   ];
 
-  // ── Run all extractor × resolver combinations ──
+  const resolvers = args.resolver === "all"
+    ? allResolvers
+    : allResolvers.filter((r) => r.key === args.resolver);
+
+  if (resolvers.length === 0) {
+    console.error(`Unknown resolver: "${args.resolver}". Use: lcs, arctic, gemma, all`);
+    process.exit(1);
+  }
+
+  console.log(`Running: extractors=[${extractors.map((e) => e.name).join(", ")}] × resolvers=[${resolvers.map((r) => r.name).join(", ")}]`);
+
+  // ── Run extractor × resolver combinations ──
   const allResults: Array<{ extractor: string; resolver: string; result: AggregateResult }> = [];
 
   for (const ext of extractors) {
@@ -483,22 +535,24 @@ async function main(): Promise<void> {
   }
 
   // ── Cleanup embedding providers ──
-  await arcticProvider.dispose();
-  await gemmaProvider.dispose();
+  if (arcticProvider) await arcticProvider.dispose();
+  if (gemmaProvider) await gemmaProvider.dispose();
 
-  // ── Side-by-side comparison ──
-  console.log("\n" + "=".repeat(60));
-  console.log("SIDE-BY-SIDE COMPARISON");
-  console.log("=".repeat(60));
+  // ── Side-by-side comparison (only when multiple combos ran) ──
+  if (allResults.length > 1) {
+    console.log("\n" + "=".repeat(60));
+    console.log("SIDE-BY-SIDE COMPARISON");
+    console.log("=".repeat(60));
 
-  console.table(allResults.map(({ extractor, resolver, result: r }) => ({
-    Extractor: extractor,
-    Resolver: resolver,
-    TP: r.totalTP, FP: r.totalFP, FN: r.totalFN,
-    P: r.precision.toFixed(4),
-    R: r.recall.toFixed(4),
-    F1: r.f1.toFixed(4),
-  })));
+    console.table(allResults.map(({ extractor, resolver, result: r }) => ({
+      Extractor: extractor,
+      Resolver: resolver,
+      TP: r.totalTP, FP: r.totalFP, FN: r.totalFN,
+      P: r.precision.toFixed(4),
+      R: r.recall.toFixed(4),
+      F1: r.f1.toFixed(4),
+    })));
+  }
 
   // ── Per-file deltas: best SpanExtractor vs best YakeLite (by F1) ──
   const spanBest = allResults.filter((r) => r.extractor === "SpanExtractor")
