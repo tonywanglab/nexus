@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { SpanExtractor } from "../src/keyphrase/span-extractor";
+import { YakeLite } from "../src/keyphrase/yake-lite";
 import { AliasResolver } from "../src/resolver/index";
 import { EmbeddingResolver } from "../src/resolver/embedding-resolver";
 import { EmbeddingProvider } from "../src/resolver/embedding-provider";
@@ -102,6 +103,65 @@ function extractGroundTruth(content: string, sourceBasename: string): Set<string
   return targets;
 }
 
+// ── Vault preparation (mirrors strip-unlinked-titles.ts) ────────
+
+/** Split content into frontmatter, body, and wiki footer (never touch those zones). */
+function splitProtectedZones(content: string): { frontmatter: string; body: string; footer: string } {
+  let frontmatter = "";
+  let body = content;
+  if (content.startsWith("---")) {
+    const endIdx = content.indexOf("\n---", 3);
+    if (endIdx !== -1) {
+      const fmEnd = endIdx + 4;
+      frontmatter = content.slice(0, fmEnd);
+      body = content.slice(fmEnd);
+    }
+  }
+  let footer = "";
+  const footerIdx = body.indexOf("%% wiki footer");
+  if (footerIdx !== -1) {
+    footer = body.slice(footerIdx);
+    body = body.slice(0, footerIdx);
+  }
+  return { frontmatter, body, footer };
+}
+
+/**
+ * Pass 1: remove aliased wikilinks [[target|display]] entirely.
+ * These cause FNs because the display text doesn't match the target title.
+ */
+function removeAliasedWikilinks(content: string): string {
+  const { frontmatter, body, footer } = splitProtectedZones(content);
+  const cleaned = body.replace(/(?<!!)\[\[([^\]|]+)\|([^\]]+)\]\]/g, "");
+  return frontmatter + cleaned + footer;
+}
+
+/**
+ * Pass 2: strip plain-text occurrences of vault titles (longest-first, word-boundary).
+ * Protects existing wikilinks so they aren't double-processed.
+ */
+function stripUnlinkedMentions(content: string, allTitles: string[], ownTitle: string): string {
+  const { frontmatter, body, footer } = splitProtectedZones(content);
+  const titlesToStrip = allTitles
+    .filter((t) => t !== ownTitle)
+    .sort((a, b) => b.length - a.length);
+
+  const links: string[] = [];
+  let work = body.replace(/\[\[[^\]]*\]\]/g, (match) => {
+    links.push(match);
+    return `\x00LINK_${links.length - 1}\x00`;
+  });
+
+  for (const title of titlesToStrip) {
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(?<![a-zA-Z0-9])${escaped}(?![a-zA-Z0-9])`, "gi");
+    work = work.replace(re, "");
+  }
+
+  work = work.replace(/\x00LINK_(\d+)\x00/g, (_, idx) => links[Number(idx)]);
+  return frontmatter + work + footer;
+}
+
 // ── Wikilink stripping ──────────────────────────────────────────
 
 function stripWikilinksForEval(content: string): string {
@@ -132,14 +192,18 @@ async function evaluate(
   const perFile: PerFileResult[] = [];
 
   for (const file of files) {
-    const rawGroundTruth = extractGroundTruth(file.content, file.basename);
+    // Pass 1: remove aliased wikilinks before ground truth extraction
+    const pass1Content = removeAliasedWikilinks(file.content);
+    const rawGroundTruth = extractGroundTruth(pass1Content, file.basename);
     const groundTruth = new Set<string>();
     for (const target of rawGroundTruth) {
       if (normalizedTitles.has(target)) groundTruth.add(target);
     }
     if (groundTruth.size === 0) continue;
 
-    const strippedContent = stripWikilinksForEval(file.content);
+    // Pass 2: strip unlinked title mentions, then convert remaining wikilinks to plain text
+    const pass2Content = stripUnlinkedMentions(pass1Content, noteTitles, file.basename);
+    const strippedContent = stripWikilinksForEval(pass2Content);
     const phrases = extractFn(strippedContent, vaultContext);
     const candidates = await resolveFn(phrases, noteTitles, file.basename + ".md");
 
@@ -367,29 +431,20 @@ async function main(): Promise<void> {
   const noteTitles = files.map((f) => f.basename);
   const vaultContext: VaultContext = { noteTitles };
 
+  // ── Extractors ──
   const spanExtractor = new SpanExtractor();
-  const extractFn = (content: string, ctx: VaultContext) => spanExtractor.extract(content, ctx);
+  const spanExtractFn = (content: string, ctx: VaultContext) => spanExtractor.extract(content, ctx);
 
-  // ── 1. Deterministic (LCS) resolver ──
-  console.log("\n" + "=".repeat(60));
-  console.log("DETERMINISTIC (LCS) RESOLVER");
-  console.log("=".repeat(60));
+  const yakeLite = new YakeLite();
+  const yakeExtractFn = (content: string, ctx: VaultContext) => yakeLite.extract(content, ctx);
 
+  const extractors = [
+    { name: "SpanExtractor", fn: spanExtractFn },
+    { name: "YakeLite", fn: yakeExtractFn },
+  ];
+
+  // ── Resolvers ──
   const deterministicResolver = new AliasResolver();
-  const detResult = await evaluate(
-    "Deterministic (LCS)",
-    extractFn, files, noteTitles,
-    (phrases, titles, src) => deterministicResolver.resolve(phrases, titles, src),
-    vaultContext,
-  );
-  printResult(detResult);
-  printWorstPrecision(detResult);
-  printWorstRecall(detResult);
-
-  // ── 2. Stochastic: Arctic-embed-xs (384d) ──
-  console.log("\n" + "=".repeat(60));
-  console.log("STOCHASTIC: Arctic-embed-xs (384d, threshold=0.95)");
-  console.log("=".repeat(60));
 
   const arcticProvider = new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
   const arcticResolver = new EmbeddingResolver({
@@ -397,79 +452,82 @@ async function main(): Promise<void> {
     similarityThreshold: 0.95,
   });
 
-  const arcticResult = await evaluate(
-    "Arctic-embed-xs (384d)",
-    extractFn, files, noteTitles,
-    (phrases, titles, src) => arcticResolver.resolve(phrases, titles, src),
-    vaultContext,
-  );
-  printResult(arcticResult);
-  printWorstPrecision(arcticResult);
-  printWorstRecall(arcticResult);
-  await arcticProvider.dispose();
-
-  // ── 3. Stochastic: EmbeddingGemma-300m q4 (768d) ──
-  console.log("\n" + "=".repeat(60));
-  console.log("STOCHASTIC: EmbeddingGemma-300m q4 (768d, threshold=0.95)");
-  console.log("=".repeat(60));
-
   const gemmaProvider = new GemmaEmbeddingProvider("onnx-community/embeddinggemma-300m-ONNX", 768, "q4");
   const gemmaResolver = new EmbeddingResolver({
     embeddingProvider: gemmaProvider,
     similarityThreshold: 0.95,
   });
 
-  const gemmaResult = await evaluate(
-    "EmbeddingGemma-300m q4 (768d)",
-    extractFn, files, noteTitles,
-    (phrases, titles, src) => gemmaResolver.resolve(phrases, titles, src),
-    vaultContext,
-  );
-  printResult(gemmaResult);
-  printWorstPrecision(gemmaResult);
-  printWorstRecall(gemmaResult);
+  const resolvers = [
+    { name: "LCS", fn: (p: ExtractedPhrase[], t: string[], s: string) => deterministicResolver.resolve(p, t, s) },
+    { name: "Arctic-xs (384d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => arcticResolver.resolve(p, t, s) },
+    { name: "Gemma-300m q4 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver.resolve(p, t, s) },
+  ];
+
+  // ── Run all extractor × resolver combinations ──
+  const allResults: Array<{ extractor: string; resolver: string; result: AggregateResult }> = [];
+
+  for (const ext of extractors) {
+    for (const res of resolvers) {
+      const label = `${ext.name} + ${res.name}`;
+      console.log("\n" + "=".repeat(60));
+      console.log(label);
+      console.log("=".repeat(60));
+
+      const result = await evaluate(label, ext.fn, files, noteTitles, res.fn, vaultContext);
+      printResult(result);
+      printWorstPrecision(result);
+      printWorstRecall(result);
+      allResults.push({ extractor: ext.name, resolver: res.name, result });
+    }
+  }
+
+  // ── Cleanup embedding providers ──
+  await arcticProvider.dispose();
   await gemmaProvider.dispose();
 
-  // ── 4. Side-by-side comparison ──
+  // ── Side-by-side comparison ──
   console.log("\n" + "=".repeat(60));
   console.log("SIDE-BY-SIDE COMPARISON");
   console.log("=".repeat(60));
 
-  const allResults = [
-    { name: "Deterministic (LCS)", result: detResult },
-    { name: "Arctic-embed-xs (384d)", result: arcticResult },
-    { name: "EmbeddingGemma q4 (768d)", result: gemmaResult },
-  ];
-
-  console.table(allResults.map(({ name, result: r }) => ({
-    Resolver: name,
+  console.table(allResults.map(({ extractor, resolver, result: r }) => ({
+    Extractor: extractor,
+    Resolver: resolver,
     TP: r.totalTP, FP: r.totalFP, FN: r.totalFN,
     P: r.precision.toFixed(4),
     R: r.recall.toFixed(4),
     F1: r.f1.toFixed(4),
   })));
 
-  // ── 5. Per-file deltas (Gemma vs LCS) ──
-  console.log("\n=== Files where Gemma beats LCS (by F1) ===");
-  const deltas: Array<{ file: string; lcsF1: string; gemmaF1: string; delta: string }> = [];
-  for (const detFile of detResult.perFile) {
-    const gemmaFile = gemmaResult.perFile.find((r) => r.file === detFile.file);
-    if (!gemmaFile) continue;
-    const d = gemmaFile.f1 - detFile.f1;
-    if (Math.abs(d) > 0.01) {
-      deltas.push({
-        file: detFile.file,
-        lcsF1: detFile.f1.toFixed(3),
-        gemmaF1: gemmaFile.f1.toFixed(3),
-        delta: (d > 0 ? "+" : "") + d.toFixed(3),
-      });
-    }
-  }
-  deltas.sort((a, b) => parseFloat(b.delta) - parseFloat(a.delta));
-  console.table(deltas.slice(0, 15));
+  // ── Per-file deltas: best SpanExtractor vs best YakeLite (by F1) ──
+  const spanBest = allResults.filter((r) => r.extractor === "SpanExtractor")
+    .sort((a, b) => b.result.f1 - a.result.f1)[0];
+  const yakeBest = allResults.filter((r) => r.extractor === "YakeLite")
+    .sort((a, b) => b.result.f1 - a.result.f1)[0];
 
-  console.log("\n=== Files where LCS beats Gemma (by F1) ===");
-  console.table(deltas.filter(d => parseFloat(d.delta) < 0).slice(0, 15));
+  if (spanBest && yakeBest) {
+    console.log(`\n=== Per-file deltas: ${spanBest.extractor}+${spanBest.resolver} vs ${yakeBest.extractor}+${yakeBest.resolver} ===`);
+    const deltas: Array<{ file: string; spanF1: string; yakeF1: string; delta: string }> = [];
+    for (const spanFile of spanBest.result.perFile) {
+      const yakeFile = yakeBest.result.perFile.find((r) => r.file === spanFile.file);
+      if (!yakeFile) continue;
+      const d = yakeFile.f1 - spanFile.f1;
+      if (Math.abs(d) > 0.01) {
+        deltas.push({
+          file: spanFile.file,
+          spanF1: spanFile.f1.toFixed(3),
+          yakeF1: yakeFile.f1.toFixed(3),
+          delta: (d > 0 ? "+" : "") + d.toFixed(3),
+        });
+      }
+    }
+    deltas.sort((a, b) => parseFloat(b.delta) - parseFloat(a.delta));
+    console.log("\nYakeLite wins:");
+    console.table(deltas.filter((d) => parseFloat(d.delta) > 0).slice(0, 15));
+    console.log("\nSpanExtractor wins:");
+    console.table(deltas.filter((d) => parseFloat(d.delta) < 0).slice(0, 15));
+  }
 }
 
 main().catch((err) => {
