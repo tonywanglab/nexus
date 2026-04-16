@@ -1,15 +1,37 @@
 /**
  * Longest Common Subsequence length between two strings.
+ * Uses single-row DP optimization: O(n·m) time, O(min(n,m)) space.
+ * Expects pre-normalized (e.g. lowercased) input — no case folding is applied.
  */
-export function lcsLength(_a: string, _b: string): number {
-  // TODO: implement Hirschberg's LCS
-  return 0;
+export function lcsLength(a: string, b: string): number {
+  // Ensure b is the shorter string for space optimization
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  const m = short.length;
+  const n = long.length;
+
+  const prev = new Uint16Array(m + 1);
+
+  for (let i = 1; i <= n; i++) {
+    let prevDiag = 0;
+    for (let j = 1; j <= m; j++) {
+      const temp = prev[j];
+      if (long[i - 1] === short[j - 1]) {
+        prev[j] = prevDiag + 1;
+      } else {
+        prev[j] = Math.max(prev[j], prev[j - 1]);
+      }
+      prevDiag = temp;
+    }
+  }
+
+  return prev[m];
 }
 
 /**
  * Normalized similarity in [0, 1] using LCS.
+ * Returns lcsLength(a,b) / max(a.length, b.length), or 0 for empty inputs.
  */
-export function normalizedSimilarity(_a: string, _b: string): number {
-  // TODO: lcsLength(a,b) / max(a.length, b.length)
-  return 0;
+export function normalizedSimilarity(a: string, b: string): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  return lcsLength(a, b) / Math.max(a.length, b.length);
 }
