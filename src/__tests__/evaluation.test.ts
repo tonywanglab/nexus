@@ -39,6 +39,8 @@ interface PerFileResult {
   tpList: string[];
   fpList: string[];
   fnList: string[];
+  /** FN targets that were reached via a display alias (e.g. [[Target|alias]]). */
+  fnAliasedList: string[];
 }
 
 interface AggregateResult {
@@ -79,8 +81,16 @@ function loadVault(vaultDir: string): VaultFile[] {
 
 // ── Ground truth extraction ─────────────────────────────────────
 
-function extractGroundTruth(content: string, sourceBasename: string): Set<string> {
+/**
+ * Returns both the ground-truth target set and a set of normalized targets
+ * that were reached via an alias (i.e., [[target|display]] where target ≠ display).
+ */
+function extractGroundTruth(
+  content: string,
+  sourceBasename: string,
+): { targets: Set<string>; aliasedTargets: Set<string> } {
   const targets = new Set<string>();
+  const aliasedTargets = new Set<string>();
   const normalizedSource = normalize(sourceBasename);
 
   // Strip YAML frontmatter
@@ -108,6 +118,7 @@ function extractGroundTruth(content: string, sourceBasename: string): Set<string
     // Split on | → take target part (before pipe)
     const pipeIdx = inner.indexOf("|");
     const targetPart = pipeIdx !== -1 ? inner.slice(0, pipeIdx) : inner;
+    const displayPart = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : null;
 
     // Split on # → take title part (before hash)
     const hashIdx = targetPart.indexOf("#");
@@ -122,9 +133,14 @@ function extractGroundTruth(content: string, sourceBasename: string): Set<string
     if (normalizedTarget === normalizedSource) continue;
 
     targets.add(normalizedTarget);
+
+    // Track aliased links: [[target|display]] where display differs from target
+    if (displayPart !== null && normalize(displayPart) !== normalizedTarget) {
+      aliasedTargets.add(normalizedTarget);
+    }
   }
 
-  return targets;
+  return { targets, aliasedTargets };
 }
 
 // ── Wikilink stripping ──────────────────────────────────────────
@@ -133,8 +149,10 @@ function stripWikilinksForEval(content: string): string {
   // Remove transclusions/embeds entirely
   let text = content.replace(/!\[\[[^\]]*\]\]/g, "");
 
-  // [[target|display]] → display
-  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  // [[target|display]] → "display target"
+  // Inject the target title so the vault-title scan can find it even when the
+  // display text is an abbreviation or alias (e.g. [[Online Analytical Processing|OLAP]]).
+  text = text.replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?\|([^\]]+)\]\]/g, "$2 $1");
 
   // [[target#heading]] → target
   text = text.replace(/\[\[([^\]#]+)#[^\]]*\]\]/g, "$1");
