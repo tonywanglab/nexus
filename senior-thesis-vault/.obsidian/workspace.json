@@ -1,0 +1,281 @@
+{
+  "main": {
+    "id": "f278bfc773db0f7a",
+    "type": "split",
+    "children": [
+      {
+        "id": "3849c34823a48615",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "76588cd348e1676f",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Guides/Data Governance Guide.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Data Governance Guide"
+            }
+          },
+          {
+            "id": "867a534b10ae77a6",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Concepts/Data Management/Data Governance.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Data Governance"
+            }
+          }
+        ],
+        "currentTab": 1
+      },
+      {
+        "id": "59fa20e34130c4ff",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "dc403421be0c1454",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
+            }
+          },
+          {
+            "id": "456734c676d9c3e3",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Untitled.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Untitled"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "65263807cb5854d2",
+    "type": "split",
+    "children": [
+      {
+        "id": "db24d1a3281d0d7f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "15428da58ddb56c2",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "685041070be61876",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "3037ca0be4c7b74b",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "d83f00717a66a2f7",
+    "type": "split",
+    "children": [
+      {
+        "id": "60829f20c06830ea",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "69318ce8cfc41cb8",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Concepts/Data Architecture/Kappa Architecture.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Kappa Architecture"
+            }
+          },
+          {
+            "id": "b2c0e680e5524b62",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Concepts/Data Architecture/Kappa Architecture.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Kappa Architecture"
+            }
+          },
+          {
+            "id": "7401545ce8a0dac2",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "096dbbf47ee89a8c",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "eb130b0d3905e87c",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Concepts/Data Architecture/Kappa Architecture.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Kappa Architecture"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false,
+      "graph:Open graph view": false
+    }
+  },
+  "active": "456734c676d9c3e3",
+  "lastOpenFiles": [
+    "Untitled.md",
+    "Concepts/Data Management/Data Governance.md",
+    "Guides/Data Governance Guide.md",
+    "Guides/Cost Optimization in the Cloud.md",
+    "Guides/Cloud Services Map.md",
+    "Community/Community.md",
+    "Community/Events.md",
+    "Community/Salaries.md",
+    "Community/Meetups.md",
+    "Community/Get Involved.md",
+    "Tools/Workflow Orchestrators/Prefect.md",
+    "Tools/Workflow Orchestrators/Mage.md",
+    "Tools/Workflow Orchestrators/Kestra.md",
+    "Tools/Workflow Orchestrators/Flyte.md",
+    "Tools/Workflow Orchestrators/Dagster.md",
+    "Tools/Workflow Orchestrators/Azure Data Factory.md",
+    "Tools/Workflow Orchestrators/Apache Airflow.md",
+    "Tools/Workflow Orchestrators/Amazon MWAA.md",
+    "Tools/Workflow Orchestrators/AWS Step Functions.md",
+    "Tools/Programming Languages/T-SQL.md",
+    "Tools/Programming Languages/Scala.md",
+    "Tools/Programming Languages/SQL.md",
+    "Tools/Programming Languages/Python.md",
+    "Tools/Programming Languages/Java.md",
+    "Tools/File Formats/Protocol Buffers.md",
+    "Tools/File Formats/JSON.md",
+    "Tools/Workflow Orchestrators",
+    "Tools/Programming Languages",
+    "Tools/File Formats",
+    "Tools/Databases",
+    "Tools/Data Stores",
+    "Tools/Data Quality",
+    "Tools/Data Processing",
+    "Tools/Data Ingestion",
+    "Tools/Data Analytics",
+    "Tools/Compute",
+    "Assets/yugabyte.svg",
+    "Assets/window-vs-aggregate-function.png",
+    "Assets/wide_column_database_example.jpg",
+    "Assets/wes-lewis-zt6OxRORM2g-unsplash.jpg",
+    "Assets/terraform_logo.png",
+    "Assets/starburst-logo.svg",
+    "Assets/sql-window-function.png",
+    "Assets/snowflake_logo.png",
+    "Assets/row_oriented_vs_column_oriented_database.jpeg",
+    "Assets/rockset_logo.png"
+  ]
+}

@@ -318,8 +318,10 @@ export class YakeLite {
   ): ExtractedPhrase[] {
     const candidates: Map<string, ExtractedPhrase> = new Map();
 
-    // Pre-compute lowercased note titles for matching
-    const noteTitlesLower = vaultContext?.noteTitles?.map((t) => t.toLowerCase()) ?? [];
+    // Pre-compute lowercased note titles for O(1) lookup in the n-gram loop
+    const noteTitlesLower = new Set(
+      vaultContext?.noteTitles?.map((t) => t.toLowerCase()) ?? [],
+    );
 
     // Pre-compute max TF-IDF for normalization
     let maxTfIdf = 0;
@@ -400,7 +402,7 @@ export class YakeLite {
           }
 
           // 3. Note match boost (when vault context provided)
-          if (noteTitlesLower.length > 0 && noteTitlesLower.includes(phraseLower)) {
+          if (noteTitlesLower.size > 0 && noteTitlesLower.has(phraseLower)) {
             totalBoost += this.opts.noteMatchBoost;
           }
 
