@@ -1,4 +1,4 @@
-export type JobType = "process" | "reindex";
+export type JobType = "process";
 
 export interface QueueJob {
   filePath: string;
@@ -21,6 +21,7 @@ export interface CandidateEdge {
   targetPath: string;
   similarity: number;
   approved?: boolean;
+  matchType?: "deterministic" | "stochastic";
 }
 
 export interface VaultContext {
