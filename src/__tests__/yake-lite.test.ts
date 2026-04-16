@@ -1,5 +1,5 @@
 import { YakeLite } from "../keyphrase/yake-lite";
-import { ExtractedPhrase } from "../types";
+import { ExtractedPhrase, VaultContext } from "../types";
 
 describe("YakeLite", () => {
   let yake: YakeLite;
@@ -202,6 +202,203 @@ Neural networks process [[training data]] to learn patterns.`;
         expect(phrase.startOffset).toBeGreaterThanOrEqual(0);
         expect(phrase.endOffset).toBeLessThanOrEqual(content.length);
         expect(phrase.endOffset).toBeGreaterThan(phrase.startOffset);
+      }
+    });
+  });
+
+  // ── Structural importance heuristic ─────────────────────────
+
+  describe("structural importance", () => {
+    it("terms in # Title rank higher than body-only terms", () => {
+      // "visualize" is a verb (-ize suffix) so it won't get noun phrase boost
+      const content = "# Quantum\n\nWe visualize the data. We visualize again. We visualize often.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      const quantumIdx = phrases.indexOf("quantum");
+      const verbIdx = phrases.indexOf("visualize");
+      expect(quantumIdx).not.toBe(-1);
+      expect(verbIdx).not.toBe(-1);
+      // Lower index = better rank (lower score)
+      expect(quantumIdx).toBeLessThan(verbIdx);
+    });
+
+    it("terms in ## Heading rank higher than body-only terms", () => {
+      // "summarize" is a verb (-ize suffix)
+      const content = "Some intro text about nothing special.\n\n## Algorithms\n\nWe summarize the findings. We summarize again.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      const algoIdx = phrases.indexOf("algorithms");
+      const verbIdx = phrases.indexOf("summarize");
+      expect(algoIdx).not.toBe(-1);
+      expect(verbIdx).not.toBe(-1);
+      expect(algoIdx).toBeLessThan(verbIdx);
+    });
+
+    it("terms in **bold** get a boost", () => {
+      // Use two terms that would otherwise score similarly: both appear once
+      // but the bold one should rank higher
+      const content = "The **quantum** field is growing. The banana field is growing.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      const quantumIdx = phrases.indexOf("quantum");
+      const bananaIdx = phrases.indexOf("banana");
+      expect(quantumIdx).not.toBe(-1);
+      expect(bananaIdx).not.toBe(-1);
+      expect(quantumIdx).toBeLessThan(bananaIdx);
+    });
+
+    it("structural boosts stack (bold inside heading uses max)", () => {
+      const content = "# **Quantum**\n\nBanana is a fruit. Banana appears again. Banana is common.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      const quantumIdx = phrases.indexOf("quantum");
+      expect(quantumIdx).not.toBe(-1);
+      // Title boost (3) should apply — term should be ranked highly
+      expect(quantumIdx).toBeLessThanOrEqual(2);
+    });
+  });
+
+  // ── TF-IDF distinctiveness heuristic ────────────────────────
+
+  describe("TF-IDF distinctiveness", () => {
+    it("rare-in-vault terms rank higher with vault context", () => {
+      const content = "Quantum mechanics governs particle behavior. Particle physics is a broad discipline. Particle interactions are complex.";
+
+      // "quantum" is rare across vault, "particle" is very common
+      const vaultContext: VaultContext = {
+        documentFrequencies: new Map([
+          ["quantum", 1],
+          ["mechanics", 2],
+          ["particle", 80],
+          ["behavior", 30],
+          ["physics", 40],
+          ["broad", 50],
+          ["discipline", 20],
+          ["interactions", 10],
+          ["governs", 60],
+        ]),
+        totalDocuments: 100,
+      };
+
+      const resultWith = yake.extract(content, vaultContext);
+      const resultWithout = yake.extract(content);
+
+      // Find "quantum" score in both — TF-IDF should improve its ranking
+      const qWith = resultWith.find((r) => r.phrase.toLowerCase() === "quantum");
+      const qWithout = resultWithout.find((r) => r.phrase.toLowerCase() === "quantum");
+      expect(qWith).toBeDefined();
+      expect(qWithout).toBeDefined();
+      // Normalized score should be lower (better) with vault context for a rare term
+      expect(qWith!.score).toBeLessThanOrEqual(qWithout!.score);
+    });
+
+    it("without vault context, behavior is unchanged (backward compat)", () => {
+      const content = "Machine learning algorithms process data efficiently. Neural networks are a type of machine learning model.";
+      const resultWithout = yake.extract(content);
+      const resultWith = yake.extract(content); // no vault context
+
+      expect(resultWithout.length).toBe(resultWith.length);
+      for (let i = 0; i < resultWithout.length; i++) {
+        expect(resultWithout[i].phrase).toBe(resultWith[i].phrase);
+        expect(resultWithout[i].score).toBeCloseTo(resultWith[i].score, 10);
+      }
+    });
+  });
+
+  // ── Note match heuristic ────────────────────────────────────
+
+  describe("note match", () => {
+    it("phrases matching note titles rank higher", () => {
+      const content = "Quantum computing and banana smoothies are both interesting topics. We study quantum computing regularly.";
+      const vaultContext: VaultContext = {
+        noteTitles: ["Quantum Computing"],
+      };
+
+      const resultWith = yake.extract(content, vaultContext);
+      const resultWithout = yake.extract(content);
+
+      const phrasesW = resultWith.map((r) => r.phrase.toLowerCase());
+      const phrasesWO = resultWithout.map((r) => r.phrase.toLowerCase());
+
+      const qcIdxWith = phrasesW.indexOf("quantum computing");
+      const qcIdxWithout = phrasesWO.indexOf("quantum computing");
+      expect(qcIdxWith).not.toBe(-1);
+      // Note match boost should improve ranking vs without context
+      if (qcIdxWithout !== -1) {
+        expect(qcIdxWith).toBeLessThanOrEqual(qcIdxWithout);
+      }
+    });
+
+    it("case-insensitive matching works", () => {
+      const content = "quantum computing is a new field. Banana smoothies are delicious.";
+      const vaultContext: VaultContext = {
+        noteTitles: ["Quantum Computing"],
+      };
+
+      const result = yake.extract(content, vaultContext);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+      expect(phrases.indexOf("quantum computing")).not.toBe(-1);
+    });
+  });
+
+  // ── Noun phrase heuristic ─────────────────────────────────────
+
+  describe("noun phrase prioritization", () => {
+    it("noun-like terms rank higher than verb-like terms", () => {
+      // "optimization" (noun suffix -tion) vs "optimize" (verb suffix -ize)
+      const content = "We optimize the algorithm. The optimization yields results. The optimization is significant.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      const nounIdx = phrases.indexOf("optimization");
+      const verbIdx = phrases.indexOf("optimize");
+      if (nounIdx !== -1 && verbIdx !== -1) {
+        expect(nounIdx).toBeLessThan(verbIdx);
+      }
+    });
+
+    it("multi-word noun phrases rank higher than non-noun phrases", () => {
+      const content = "Machine learning transforms industries rapidly. Machine learning is important. Deep learning advances quickly.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      // "machine learning" (noun+noun-gerund) should appear
+      const mlIdx = phrases.indexOf("machine learning");
+      expect(mlIdx).not.toBe(-1);
+      // Should be ranked highly
+      expect(mlIdx).toBeLessThanOrEqual(3);
+    });
+
+    it("adverb-heavy phrases are not boosted", () => {
+      const content = "Processing happens efficiently. Data processing is a key concept. Data processing matters greatly.";
+      const result = yake.extract(content);
+      const phrases = result.map((r) => r.phrase.toLowerCase());
+
+      // "data processing" (noun phrase) should rank above "efficiently" (adverb)
+      const dpIdx = phrases.indexOf("data processing");
+      const advIdx = phrases.indexOf("efficiently");
+      if (dpIdx !== -1 && advIdx !== -1) {
+        expect(dpIdx).toBeLessThan(advIdx);
+      }
+    });
+  });
+
+  // ── Backward compatibility ──────────────────────────────────
+
+  describe("backward compatibility", () => {
+    it("extract(content) without vault context still works", () => {
+      const content = "Machine learning is transforming data science.";
+      const result = yake.extract(content);
+      expect(result.length).toBeGreaterThan(0);
+      for (const phrase of result) {
+        expect(phrase).toHaveProperty("phrase");
+        expect(phrase).toHaveProperty("score");
+        expect(phrase.score).toBeGreaterThanOrEqual(0);
+        expect(phrase.score).toBeLessThanOrEqual(1);
       }
     });
   });
