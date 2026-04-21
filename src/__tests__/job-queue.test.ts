@@ -321,4 +321,22 @@ describe("JobQueue", () => {
       expect(onProcess).not.toHaveBeenCalled();
     });
   });
+
+  // ─── forceEnqueue ──────────────────────────────────────────
+  describe("forceEnqueue", () => {
+    it("processes even when within cooldown window", () => {
+      const { onProcess, queue } = setup();
+      queue.enqueue("a.md", "process");
+      jest.advanceTimersByTime(600);
+      expect(onProcess).toHaveBeenCalledTimes(1);
+      // Normal enqueue within cooldown is silently dropped.
+      queue.enqueue("a.md", "process");
+      jest.advanceTimersByTime(600);
+      expect(onProcess).toHaveBeenCalledTimes(1);
+      // forceEnqueue bypasses cooldown.
+      queue.forceEnqueue("a.md", "process");
+      jest.advanceTimersByTime(600);
+      expect(onProcess).toHaveBeenCalledTimes(2);
+    });
+  });
 });
