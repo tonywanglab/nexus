@@ -1,9 +1,0 @@
-{
-  "id": "nexus",
-  "name": "Nexus",
-  "version": "0.1.0",
-  "minAppVersion": "1.4.0",
-  "description": "Local-first automatic link discovery for your vault.",
-  "author": "Tony Wang",
-  "isDesktopOnly": false
-}
