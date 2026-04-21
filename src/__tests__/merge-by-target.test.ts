@@ -5,8 +5,9 @@ function makeEdge(
   phraseText: string,
   targetId: string,
   similarity: number,
-  matchType: "deterministic" | "stochastic",
+  matchType: "deterministic" | "stochastic" | "sparse-feature",
   sourceId = "id-src",
+  extra: Partial<CandidateEdge> = {},
 ): CandidateEdge {
   return {
     sourcePath: "src.md",
@@ -16,11 +17,12 @@ function makeEdge(
     targetId,
     similarity,
     matchType,
+    ...extra,
   };
 }
 
 describe("mergeByTarget", () => {
-  it("passes through single-resolver edges unchanged", () => {
+  it("passes through single-resolver edges with matchedBy set", () => {
     const edges = [
       makeEdge("foo", "id-a", 0.9, "deterministic"),
       makeEdge("bar", "id-b", 0.8, "stochastic"),
@@ -29,11 +31,12 @@ describe("mergeByTarget", () => {
     expect(out).toHaveLength(2);
     const foo = out.find((e) => e.phrase.phrase === "foo")!;
     expect(foo.matchType).toBe("deterministic");
+    expect(foo.matchedBy).toEqual(["lcs"]);
     expect(foo.lcsSimilarity).toBe(0.9);
-    expect(foo.embSimilarity).toBeUndefined();
+    expect(foo.denseSimilarity).toBeUndefined();
   });
 
-  it("merges same (phraseKey, targetId) from both resolvers", () => {
+  it("merges same (phraseKey, targetId) from lcs + dense resolvers", () => {
     const edges = [
       makeEdge("neural nets", "id-tgt", 0.92, "deterministic"),
       makeEdge("neural nets", "id-tgt", 0.68, "stochastic"),
@@ -41,9 +44,10 @@ describe("mergeByTarget", () => {
     const out = mergeByTarget(edges);
     expect(out).toHaveLength(1);
     expect(out[0].matchType).toBe("both");
+    expect(out[0].matchedBy).toEqual(["lcs", "dense"]);
     expect(out[0].similarity).toBe(0.92); // max
     expect(out[0].lcsSimilarity).toBe(0.92);
-    expect(out[0].embSimilarity).toBe(0.68);
+    expect(out[0].denseSimilarity).toBe(0.68);
   });
 
   it("mergeByTarget is case/whitespace insensitive on phrase", () => {
@@ -80,7 +84,7 @@ describe("mergeByTarget", () => {
     expect(mergeByTarget([])).toEqual([]);
   });
 
-  it("stochastic edge that merges keeps emb score, lcs score from deterministic", () => {
+  it("stochastic edge that merges keeps dense score, lcs score from deterministic", () => {
     const edges = [
       makeEdge("foo", "id-a", 0.6, "stochastic"),
       makeEdge("foo", "id-a", 0.88, "deterministic"),
@@ -88,7 +92,44 @@ describe("mergeByTarget", () => {
     const out = mergeByTarget(edges);
     expect(out).toHaveLength(1);
     expect(out[0].lcsSimilarity).toBe(0.88);
-    expect(out[0].embSimilarity).toBe(0.6);
+    expect(out[0].denseSimilarity).toBe(0.6);
     expect(out[0].similarity).toBe(0.88);
+  });
+
+  it("3-way merge: lcs + dense + sparse yield matchedBy union and max similarity", () => {
+    const sparseFeatures = {
+      phraseFeatures: [{ idx: 42, value: 0.5, label: "foo · bar · baz" }],
+      titleFeatures:  [{ idx: 42, value: 0.6, label: "foo · bar · baz" }],
+    };
+    const edges = [
+      makeEdge("graph theory", "id-tgt", 0.82, "deterministic"),
+      makeEdge("graph theory", "id-tgt", 0.77, "stochastic"),
+      makeEdge("graph theory", "id-tgt", 0.91, "sparse-feature", "id-src", { sparseFeatures }),
+    ];
+    const out = mergeByTarget(edges);
+    expect(out).toHaveLength(1);
+    const e = out[0];
+    expect(e.matchedBy).toEqual(["lcs", "dense", "sparse"]);
+    expect(e.matchType).toBe("mixed");
+    expect(e.lcsSimilarity).toBe(0.82);
+    expect(e.denseSimilarity).toBe(0.77);
+    expect(e.sparseSimilarity).toBe(0.91);
+    expect(e.similarity).toBe(0.91); // max
+    expect(e.sparseFeatures).toBe(sparseFeatures);
+  });
+
+  it("sparse-only edge carries sparseFeatures and matchedBy=['sparse']", () => {
+    const sparseFeatures = {
+      phraseFeatures: [{ idx: 1, value: 0.3, label: "a · b · c" }],
+      titleFeatures:  [{ idx: 1, value: 0.4, label: "a · b · c" }],
+    };
+    const edges = [
+      makeEdge("graph theory", "id-tgt", 0.85, "sparse-feature", "id-src", { sparseFeatures }),
+    ];
+    const out = mergeByTarget(edges);
+    expect(out).toHaveLength(1);
+    expect(out[0].matchedBy).toEqual(["sparse"]);
+    expect(out[0].sparseSimilarity).toBe(0.85);
+    expect(out[0].sparseFeatures).toBe(sparseFeatures);
   });
 });

@@ -18,6 +18,6 @@ module.exports = {
     ],
   },
   testMatch: ["**/src/__tests__/**/*.test.ts"],
-  testPathIgnorePatterns: ["/node_modules/", "/.claude/"],
-  modulePathIgnorePatterns: ["/.claude/"],
+  testPathIgnorePatterns: ["/node_modules/", "<rootDir>/.claude/"],
+  modulePathIgnorePatterns: ["<rootDir>/.claude/"],
 };

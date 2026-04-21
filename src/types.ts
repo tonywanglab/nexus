@@ -17,7 +17,13 @@ export interface ExtractedPhrase {
 
 export type NoteId = string;
 
-export type MatchType = "deterministic" | "stochastic" | "both";
+export type Resolver = "lcs" | "dense" | "sparse";
+
+/**
+ * Legacy single-resolver tag. Retained so edges persisted before `matchedBy`
+ * existed still round-trip. New code should read `matchedBy` instead.
+ */
+export type MatchType = "deterministic" | "stochastic" | "sparse-feature" | "both" | "mixed";
 
 export interface CandidateEdge {
   sourcePath: string;
@@ -26,11 +32,19 @@ export interface CandidateEdge {
   targetPath: string;
   targetId?: NoteId;
   similarity: number;
-  /** Per-resolver scores, populated when matchType === "both". */
+  /** Set of resolvers that contributed to this edge. */
+  matchedBy?: Resolver[];
+  /** Per-resolver scores. Populated when the corresponding resolver contributed. */
   lcsSimilarity?: number;
-  embSimilarity?: number;
+  denseSimilarity?: number;
+  sparseSimilarity?: number;
   approved?: boolean;
   matchType?: MatchType;
+  /** Top-4 labeled SAE features per side. Populated only when sparse resolver contributed. */
+  sparseFeatures?: {
+    phraseFeatures: { idx: number; value: number; label: string }[];
+    titleFeatures:  { idx: number; value: number; label: string }[];
+  };
 }
 
 export interface DenialRecord {

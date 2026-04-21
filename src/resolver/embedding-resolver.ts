@@ -4,6 +4,8 @@ import { cosineSimilarity } from "./cosine";
 import { excludeSelfTitles } from "./normalization";
 import { dedupAndRank } from "./shared-utils";
 import { SparseAutoencoder } from "./sae";
+import { SAEFeatureLabels } from "./sae-feature-labels";
+import { sparseCosine } from "./sparse-feature-match";
 
 export interface EmbeddingResolverOptions {
   embeddingProvider: EmbeddingProvider;
@@ -109,6 +111,89 @@ export class EmbeddingResolver {
     if (titleSparseEmbeddings) result.titleSparseEmbeddings = titleSparseEmbeddings;
     if (phraseSparseEmbeddings) result.phraseSparseEmbeddings = phraseSparseEmbeddings;
     return result;
+  }
+
+  /**
+   * Third resolver path: match phrases to titles via sparse SAE feature cosine similarity.
+   * Scoring uses all labeled active features; the edge payload carries the top-4 for display.
+   * Requires an SAE configured at construction time (throws otherwise).
+   */
+  async resolveBySparseFeatures(
+    phrases: ExtractedPhrase[],
+    noteTitles: string[],
+    sourcePath: string,
+    featureLabels: SAEFeatureLabels,
+    opts?: { similarityThreshold?: number; maxCandidatesPerPhrase?: number; priority?: EmbeddingPriority },
+  ): Promise<CandidateEdge[]> {
+    if (!this.sae) throw new Error("resolveBySparseFeatures requires an SAE");
+    const similarityThreshold = opts?.similarityThreshold ?? this.similarityThreshold;
+    const maxCandidatesPerPhrase = opts?.maxCandidatesPerPhrase ?? this.maxCandidatesPerPhrase;
+    const priority = opts?.priority ?? "normal";
+
+    const filteredTitles = excludeSelfTitles(noteTitles, sourcePath);
+    if (filteredTitles.length === 0 || phrases.length === 0) return [];
+
+    const titleEmbeddings = await this.embedTitles(filteredTitles, priority);
+    const phraseTexts = phrases.map(p => p.phrase);
+    const phraseEmbeddings = await this.provider.embedBatch(phraseTexts, { priority });
+
+    // Pre-compute sparse features for all titles.
+    const titleMatchFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickAllLabeled"]>>();
+    const titleDisplayFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickTop4Labeled"]>>();
+    for (const title of filteredTitles) {
+      const dense = titleEmbeddings.get(title);
+      if (!dense) continue;
+      const enc = this.sae.encodeSparse(dense);
+      titleMatchFeatures.set(title, featureLabels.pickAllLabeled(enc));
+      titleDisplayFeatures.set(title, featureLabels.pickTop4Labeled(enc));
+    }
+
+    const candidates: CandidateEdge[] = [];
+
+    for (let pi = 0; pi < phrases.length; pi++) {
+      const phrase = phrases[pi];
+      const phraseEnc = this.sae.encodeSparse(phraseEmbeddings[pi]);
+      const phraseMatch = featureLabels.pickAllLabeled(phraseEnc);
+      const phraseDisplay = featureLabels.pickTop4Labeled(phraseEnc);
+
+      if (phraseMatch.indices.length === 0) continue;
+
+      const phraseCandidates: CandidateEdge[] = [];
+
+      for (const title of filteredTitles) {
+        const titleMatch = titleMatchFeatures.get(title);
+        const titleDisplay = titleDisplayFeatures.get(title);
+        if (!titleMatch || titleMatch.indices.length === 0 || !titleDisplay) continue;
+
+        const similarity = sparseCosine(phraseMatch, titleMatch);
+        if (similarity < similarityThreshold) continue;
+
+        phraseCandidates.push({
+          sourcePath,
+          phrase,
+          targetPath: title,
+          similarity,
+          matchType: "sparse-feature",
+          sparseFeatures: {
+            phraseFeatures: phraseDisplay.indices.map((idx, i) => ({
+              idx,
+              value: phraseDisplay.values[i],
+              label: phraseDisplay.labels[i],
+            })),
+            titleFeatures: titleDisplay.indices.map((idx, i) => ({
+              idx,
+              value: titleDisplay.values[i],
+              label: titleDisplay.labels[i],
+            })),
+          },
+        });
+      }
+
+      phraseCandidates.sort((a, b) => b.similarity - a.similarity);
+      candidates.push(...phraseCandidates.slice(0, maxCandidatesPerPhrase));
+    }
+
+    return dedupAndRank(candidates);
   }
 
   private async embedTitles(

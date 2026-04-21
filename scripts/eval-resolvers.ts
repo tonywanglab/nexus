@@ -5,13 +5,14 @@
  * Runs outside Jest to avoid ONNX/VM sandbox incompatibility.
  *
  * Usage:
- *   npm run eval                                    # all 6 combos
+ *   npm run eval                                    # all combos
  *   npm run eval -- --extractor=span                # SpanExtractor × all resolvers
  *   npm run eval -- --resolver=lcs                  # all extractors × LCS
  *   npm run eval -- --extractor=yake --resolver=lcs # single combo
+ *   npm run eval -- --resolver=sparse               # sparse-feature resolver only
  *
  * Extractor values: span, yake, all (default: all)
- * Resolver values:  lcs, arctic, gemma, all (default: all)
+ * Resolver values:  lcs, arctic, gemma, sparse, all (default: all)
  */
 
 import * as fs from "fs";
@@ -21,6 +22,8 @@ import { YakeLite } from "../src/keyphrase/yake-lite";
 import { AliasResolver } from "../src/resolver/index";
 import { EmbeddingResolver } from "../src/resolver/embedding-resolver";
 import { EmbeddingProvider } from "../src/resolver/embedding-provider";
+import { SparseAutoencoder } from "../src/resolver/sae";
+import { SAEFeatureLabels } from "../src/resolver/sae-feature-labels";
 import { cosineSimilarity } from "../src/resolver/cosine";
 import { normalize } from "../src/resolver/normalization";
 import { ExtractedPhrase, CandidateEdge, VaultContext } from "../src/types";
@@ -427,17 +430,19 @@ function printWorstRecall(result: AggregateResult, n = 10): void {
 
 // ── CLI argument parsing ────────────────────────────────────────
 
-function parseArgs(): { extractor: string; resolver: string } {
+function parseArgs(): { extractor: string; resolver: string; sparseThreshold: number } {
   let extractor = "all";
   let resolver = "all";
+  let sparseThreshold = 0.75;
   for (const arg of process.argv.slice(2)) {
-    const match = arg.match(/^--(\w+)=(\w+)$/);
+    const match = arg.match(/^--([^=]+)=(.+)$/);
     if (match) {
       if (match[1] === "extractor") extractor = match[2].toLowerCase();
       if (match[1] === "resolver") resolver = match[2].toLowerCase();
+      if (match[1] === "sparse-threshold") sparseThreshold = Number(match[2]);
     }
   }
-  return { extractor, resolver };
+  return { extractor, resolver, sparseThreshold };
 }
 
 async function main(): Promise<void> {
@@ -482,6 +487,8 @@ async function main(): Promise<void> {
   let arcticResolver: EmbeddingResolver | null = null;
   let gemmaProvider: GemmaEmbeddingProvider | null = null;
   let gemmaResolver: EmbeddingResolver | null = null;
+  let sparseResolver: EmbeddingResolver | null = null;
+  let sparseFeatureLabels: SAEFeatureLabels | null = null;
 
   if (args.resolver === "all" || args.resolver === "arctic") {
     arcticProvider = new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
@@ -499,10 +506,31 @@ async function main(): Promise<void> {
     });
   }
 
+  if (args.resolver === "all" || args.resolver === "sparse") {
+    const weightsPath = path.resolve(__dirname, "../assets/sae-weights.bin");
+    if (!fs.existsSync(weightsPath)) {
+      console.error(`SAE weights not found at ${weightsPath}`);
+      process.exit(1);
+    }
+    const sae = SparseAutoencoder.deserialize(fs.readFileSync(weightsPath));
+    sparseFeatureLabels = new SAEFeatureLabels();
+    // Reuse arctic provider if available, otherwise create one.
+    const sparseProvider = arcticProvider ?? new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
+    sparseResolver = new EmbeddingResolver({
+      embeddingProvider: sparseProvider,
+      sae,
+      similarityThreshold: args.sparseThreshold,
+    });
+    console.log(`Sparse-feature threshold: ${args.sparseThreshold}`);
+    console.log(`SAE feature labels loaded: ${sparseFeatureLabels.liveCount} live features`);
+    if (!arcticProvider) arcticProvider = sparseProvider as PipelineEmbeddingProvider;
+  }
+
   const allResolvers = [
     { key: "lcs", name: "LCS", fn: (p: ExtractedPhrase[], t: string[], s: string) => deterministicResolver.resolve(p, t, s) },
     ...(arcticResolver ? [{ key: "arctic", name: "Arctic-xs (384d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => arcticResolver!.resolve(p, t, s) }] : []),
     ...(gemmaResolver ? [{ key: "gemma", name: "Gemma-300m q4 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver!.resolve(p, t, s) }] : []),
+    ...(sparseResolver ? [{ key: "sparse", name: "Sparse-feature (SAE)", fn: (p: ExtractedPhrase[], t: string[], s: string) => sparseResolver!.resolveBySparseFeatures(p, t, s, sparseFeatureLabels!) }] : []),
   ];
 
   const resolvers = args.resolver === "all"
@@ -510,7 +538,7 @@ async function main(): Promise<void> {
     : allResolvers.filter((r) => r.key === args.resolver);
 
   if (resolvers.length === 0) {
-    console.error(`Unknown resolver: "${args.resolver}". Use: lcs, arctic, gemma, all`);
+    console.error(`Unknown resolver: "${args.resolver}". Use: lcs, arctic, gemma, sparse, all`);
     process.exit(1);
   }
 
