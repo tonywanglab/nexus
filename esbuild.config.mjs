@@ -51,6 +51,9 @@ const context = await esbuild.context({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
+  // Embed the pre-trained SAE weights file directly into main.js as a
+  // Uint8Array default export (binary loader).
+  loader: { ".bin": "binary" },
   outfile,
 });
 

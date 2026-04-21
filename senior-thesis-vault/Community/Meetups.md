@@ -1,4 +1,4 @@
-Explore our up-to-date list of active community-run data engineering meetups.
+Explore our up-to-date list of active [[Community]]-run data engineering meetups.
 
 > [!info]- Interested in starting a meetup in your area? Check out our [Data Engineering Meetup-in-a-Box](https://github.com/data-engineering-community/data-engineering-meetup-in-a-box).
 
