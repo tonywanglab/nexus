@@ -18,7 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 
-const DIMS = 384;
+const DIMS = 768;
 const N_CONCEPTS = 48;
 const N_SAMPLES = 4096;
 const SEED = 0xA5A5A5;

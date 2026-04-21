@@ -1,7 +1,7 @@
 #!/usr/bin/env npx ts-node
 /**
  * Embed the training corpus one line at a time using the same model the plugin
- * uses at runtime (Snowflake/snowflake-arctic-embed-xs, 384-dim). Writes a raw
+ * uses at runtime (default EmbeddingGemma, 768-dim). Writes a raw
  * Float32 LE blob of shape [N, dims] to disk, resumable if interrupted.
  *
  * Usage:
@@ -13,7 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as crypto from "crypto";
-import { PipelineEmbeddingProvider } from "./lib/node-providers";
+import { createNodeEmbeddingProvider } from "./lib/node-providers";
 
 const FLOAT_SIZE = 4;
 
@@ -39,8 +39,8 @@ function parseCli(argv: string[]): CliOptions {
     input: str("input", "data/wiki/corpus.txt"),
     output: str("output", "data/wiki/embeddings.f32.bin"),
     manifest: str("manifest", "data/wiki/embeddings-manifest.json"),
-    model: str("model", "Snowflake/snowflake-arctic-embed-xs"),
-    dims: num("dims", 384),
+    model: str("model", "onnx-community/embeddinggemma-300m-ONNX"),
+    dims: num("dims", 768),
     batchSize: num("batch-size", 64),
     flushEvery: num("flush-every", 10_000),
   };
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
   // Open the output file for appending raw Float32 bytes.
   const fd = fs.openSync(opts.output, "a");
 
-  const provider = new PipelineEmbeddingProvider(opts.model, opts.dims);
+  const provider = createNodeEmbeddingProvider(opts.model, opts.dims);
   process.stderr.write(`Warming up ${opts.model}...\n`);
   await provider.embedBatch(["warmup"]);
 

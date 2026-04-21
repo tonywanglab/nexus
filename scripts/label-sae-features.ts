@@ -1,8 +1,9 @@
 #!/usr/bin/env npx ts-node
 /**
  * Vocabulary projection: label each SAE decoder atom (column of W_dec) with
- * the top-3 Numberbatch concept strings whose Arctic embeddings are most
- * cosine-similar to that atom.
+ * the top-3 Numberbatch concept strings whose embeddings (same model as
+ * `npm run vocab:embed`, default EmbeddingGemma 768-d) are most cosine-similar
+ * to that atom.
  *
  * Prereqs (run in order):
  *   npm run vocab:build   →  data/vocab.txt

@@ -15,7 +15,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { SparseAutoencoder } from "../src/resolver/sae";
 
-const D_MODEL = 384;
+// Placeholder shipped with the plugin — small d_hidden keeps the binary ~9MB (768×1536×2 fp32).
+// Production training overrides via `npm run train:sae -- --d-hidden=16384 --k=6`.
+const D_MODEL = 768;
 const D_HIDDEN = 1536;
 const K = 32;
 const SEED = 0xC0FFEE;
