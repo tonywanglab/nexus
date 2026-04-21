@@ -184,11 +184,14 @@ function evaluateExtractor(
 
   for (const file of files) {
     // 1. Extract ground truth from raw content
-    const rawGroundTruth = extractGroundTruth(file.content, file.basename);
+    const { targets: rawTargets, aliasedTargets } = extractGroundTruth(
+      file.content,
+      file.basename,
+    );
 
     // 2. Filter ground truth to targets that exist in the vault
     const groundTruth = new Set<string>();
-    for (const target of rawGroundTruth) {
+    for (const target of rawTargets) {
       if (normalizedTitles.has(target)) {
         groundTruth.add(target);
       }
@@ -211,6 +214,7 @@ function evaluateExtractor(
     const tpList: string[] = [];
     const fpList: string[] = [];
     const fnList: string[] = [];
+    const fnAliasedList: string[] = [];
 
     for (const target of predicted) {
       if (groundTruth.has(target)) {
@@ -222,6 +226,7 @@ function evaluateExtractor(
     for (const target of groundTruth) {
       if (!predicted.has(target)) {
         fnList.push(target);
+        if (aliasedTargets.has(target)) fnAliasedList.push(target);
       }
     }
 
@@ -238,7 +243,7 @@ function evaluateExtractor(
       predicted,
       tp, fp, fn,
       precision, recall, f1,
-      tpList, fpList, fnList,
+      tpList, fpList, fnList, fnAliasedList,
     });
   }
 
