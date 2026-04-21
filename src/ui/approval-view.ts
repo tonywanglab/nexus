@@ -229,10 +229,14 @@ export class NexusApprovalView extends ItemView {
     header.createEl("span", { text: vm.targetTitle, cls: "nexus-target" });
 
     const meta = card.createEl("div", { cls: "nexus-card-meta" });
-    meta.createEl("span", { text: vm.badge, cls: `nexus-badge nexus-badge-${vm.badge}` });
+    meta.createEl("span", { text: vm.badge, cls: `nexus-badge nexus-badge-${vm.badge.replace(/\+/g, "-")}` });
     meta.createEl("span", { text: vm.similarityLabel, cls: "nexus-similarity" });
     if (vm.scoreDetail) {
       meta.createEl("span", { text: vm.scoreDetail, cls: "nexus-score-detail" });
+    }
+
+    if (vm.edge.sparseFeatures) {
+      this.renderSparseFeatures(card, vm.edge.sparseFeatures);
     }
 
     const actions = card.createEl("div", { cls: "nexus-card-actions" });
@@ -242,6 +246,34 @@ export class NexusApprovalView extends ItemView {
 
     const denyBtn = actions.createEl("button", { text: "Deny", cls: "nexus-btn nexus-deny" });
     denyBtn.addEventListener("click", () => this.handleDeny(vm));
+  }
+
+  private renderSparseFeatures(
+    card: any,
+    sparseFeatures: NonNullable<CandidateEdge["sparseFeatures"]>,
+  ): void {
+    const phraseIdxSet = new Set(sparseFeatures.phraseFeatures.map((f) => f.idx));
+    const titleIdxSet = new Set(sparseFeatures.titleFeatures.map((f) => f.idx));
+    const matchingIdxSet = new Set([...phraseIdxSet].filter((i) => titleIdxSet.has(i)));
+
+    const el = card.createEl("div", { cls: "nexus-sparse-features" });
+
+    const renderRow = (label: string, features: typeof sparseFeatures.phraseFeatures) => {
+      const row = el.createEl("div", { cls: "nexus-sparse-row" });
+      row.createEl("span", { text: label, cls: "nexus-sparse-row-label" });
+      const chips = row.createEl("span", { cls: "nexus-sparse-chips" });
+      for (const feat of features) {
+        const isMatch = matchingIdxSet.has(feat.idx);
+        const chip = chips.createEl("span", {
+          text: feat.label,
+          cls: `nexus-sparse-chip${isMatch ? " nexus-sparse-chip-match" : ""}`,
+        });
+        if (isMatch) chip.style.fontWeight = "700";
+      }
+    };
+
+    renderRow("phrase:", sparseFeatures.phraseFeatures);
+    renderRow("title:", sparseFeatures.titleFeatures);
   }
 
   private handleApprove(vm: CardVM): void {
