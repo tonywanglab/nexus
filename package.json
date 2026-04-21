@@ -23,6 +23,7 @@
     "eval:span-sparse": "npm run eval -- --extractor=span --resolver=sparse",
     "eval:yake-sparse": "npm run eval -- --extractor=yake --resolver=sparse",
     "wiki:prepare": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/prepare-wiki-corpus.ts",
+    "corpus:build-sentences": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/build-corpus-sentences.ts",
     "wiki:embed": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/embed-corpus.ts",
     "train:sae": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/train-sae.ts",
     "vocab:build": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/build-vocab.ts",

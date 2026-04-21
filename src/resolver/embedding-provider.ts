@@ -2,6 +2,8 @@
  * Embedding provider interface and implementations for dense vector embeddings.
  */
 
+import { isEmbeddingGemmaModelId } from "./gemma-embedding";
+
 export type EmbeddingPriority = "high" | "normal";
 
 export interface EmbeddingRequestOptions {
@@ -24,15 +26,10 @@ export type EmbeddingProgressListener = (ev: EmbeddingProgressEvent) => void;
 // ── TransformersIframeProvider ─────────────────────────────────────────
 
 const CDN_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
-const DEFAULT_MODEL = "Snowflake/snowflake-arctic-embed-xs";
-const DEFAULT_DIMS = 384;
+const DEFAULT_MODEL = "onnx-community/embeddinggemma-300m-ONNX";
+const DEFAULT_DIMS = 768;
 
-/**
- * Connector script injected into the hidden iframe via srcdoc.
- * Runs @huggingface/transformers in an isolated browsing context
- * so ONNX/WASM never blocks the Obsidian main thread.
- */
-function buildIframeSrcdoc(model: string): string {
+function buildPipelineIframeSrcdoc(model: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head><body><script type="module">
 import { pipeline, env } from "${CDN_URL}";
@@ -91,9 +88,111 @@ window.addEventListener("message", async (event) => {
   }
 });
 
-// Signal ready
 parent.postMessage({ id: "__ready__", result: true }, "*");
 </${"script"}></body></html>`;
+}
+
+/**
+ * EmbeddingGemma: AutoModel + tokenizer + mean pool + L2 (aligned with Node GemmaNodeProvider).
+ * Iframe source kept in sync with src/resolver/gemma-embedding.ts pooling math.
+ */
+function buildGemmaIframeSrcdoc(model: string): string {
+  const modelJs = JSON.stringify(model);
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body><script type="module">
+import { AutoModel, AutoTokenizer, env } from "${CDN_URL}";
+
+env.allowLocalModels = false;
+env.useBrowserCache = false;
+
+const MODEL_ID = ${modelJs};
+
+let tokenizer = null;
+let mdl = null;
+let loadPromise = null;
+
+function logToParent(msg) {
+  parent.postMessage({ id: "__log__", result: msg }, "*");
+}
+
+function progressCallback(p) {
+  if (p && p.status === "progress" && p.file) {
+    logToParent(\`downloading \${p.file}: \${Math.round(p.progress || 0)}%\`);
+  } else if (p && p.status === "ready") {
+    logToParent("model ready");
+  }
+}
+
+function poolMeanNorm(embeddings) {
+  const dims = embeddings.dims;
+  const seqLen = dims[1];
+  const hiddenDim = dims[2];
+  const data = embeddings.data;
+  const pooled = new Float32Array(hiddenDim);
+  for (let s = 0; s < seqLen; s++) {
+    const row = s * hiddenDim;
+    for (let d = 0; d < hiddenDim; d++) {
+      pooled[d] += data[row + d];
+    }
+  }
+  for (let d = 0; d < hiddenDim; d++) pooled[d] /= seqLen;
+  let norm = 0;
+  for (let d = 0; d < hiddenDim; d++) norm += pooled[d] * pooled[d];
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let d = 0; d < hiddenDim; d++) pooled[d] /= norm;
+  }
+  return pooled;
+}
+
+async function ensureModel() {
+  if (mdl && tokenizer) return;
+  if (!loadPromise) {
+    logToParent("loading EmbeddingGemma (first request may download a large model)…");
+    const t0 = performance.now();
+    loadPromise = (async () => {
+      tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, {
+        progress_callback: progressCallback,
+      });
+      mdl = await AutoModel.from_pretrained(MODEL_ID, {
+        dtype: "q4",
+        progress_callback: progressCallback,
+      });
+      logToParent(\`model loaded in \${Math.round(performance.now() - t0)}ms\`);
+    })();
+  }
+  await loadPromise;
+}
+
+window.addEventListener("message", async (event) => {
+  const { id, method, params } = event.data;
+  if (!id || !method) return;
+
+  try {
+    if (method === "embed_batch") {
+      await ensureModel();
+      const results = [];
+      for (const text of params.texts) {
+        const inputs = await tokenizer(text, { padding: true, truncation: true });
+        const output = await mdl(inputs);
+        const pooled = poolMeanNorm(output.last_hidden_state);
+        results.push(Array.from(pooled));
+      }
+      parent.postMessage({ id, result: results }, "*");
+    } else if (method === "ping") {
+      parent.postMessage({ id, result: "pong" }, "*");
+    }
+  } catch (err) {
+    parent.postMessage({ id, error: err.message || String(err) }, "*");
+  }
+});
+
+parent.postMessage({ id: "__ready__", result: true }, "*");
+</${"script"}></body></html>`;
+}
+
+function buildIframeSrcdoc(model: string): string {
+  return isEmbeddingGemmaModelId(model) ? buildGemmaIframeSrcdoc(model) : buildPipelineIframeSrcdoc(model);
 }
 
 interface PendingRequest {
@@ -144,10 +243,13 @@ export class TransformersIframeProvider implements EmbeddingProvider {
   // batch currently in flight.
   private queue = new PriorityQueue<() => Promise<void>>();
   private draining = false;
+  /** Time to wait for iframe `__ready__` (large Gemma downloads need minutes). */
+  private readonly iframeReadyTimeoutMs: number;
 
   constructor(model: string = DEFAULT_MODEL, dims: number = DEFAULT_DIMS) {
     this.model = model;
     this.dims = dims;
+    this.iframeReadyTimeoutMs = isEmbeddingGemmaModelId(model) ? 180_000 : 30_000;
   }
 
   onProgress(listener: EmbeddingProgressListener | null): void {
@@ -168,8 +270,11 @@ export class TransformersIframeProvider implements EmbeddingProvider {
       this.iframe = iframe;
 
       const timer = setTimeout(
-        () => reject(new Error("Iframe initialization timed out (30s)")),
-        30_000,
+        () =>
+          reject(
+            new Error(`Iframe initialization timed out (${Math.round(this.iframeReadyTimeoutMs / 1000)}s)`),
+          ),
+        this.iframeReadyTimeoutMs,
       );
 
       this.messageHandler = (event: MessageEvent) => {
