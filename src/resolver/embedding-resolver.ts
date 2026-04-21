@@ -1,5 +1,5 @@
 import { CandidateEdge, ExtractedPhrase } from "../types";
-import { EmbeddingProvider } from "./embedding-provider";
+import { EmbeddingProvider, EmbeddingPriority } from "./embedding-provider";
 import { cosineSimilarity } from "./cosine";
 import { excludeSelfTitles } from "./normalization";
 import { dedupAndRank } from "./shared-utils";
@@ -50,8 +50,9 @@ export class EmbeddingResolver {
     phrases: ExtractedPhrase[],
     noteTitles: string[],
     sourcePath: string,
+    priority: EmbeddingPriority = "normal",
   ): Promise<CandidateEdge[]> {
-    const { candidates } = await this.resolveWithSparse(phrases, noteTitles, sourcePath);
+    const { candidates } = await this.resolveWithSparse(phrases, noteTitles, sourcePath, priority);
     return candidates;
   }
 
@@ -63,6 +64,7 @@ export class EmbeddingResolver {
     phrases: ExtractedPhrase[],
     noteTitles: string[],
     sourcePath: string,
+    priority: EmbeddingPriority = "normal",
   ): Promise<{
     candidates: CandidateEdge[];
     titleSparseEmbeddings?: Map<string, Float32Array>;
@@ -73,10 +75,10 @@ export class EmbeddingResolver {
       return { candidates: [] };
     }
 
-    const titleEmbeddings = await this.embedTitles(filteredTitles);
+    const titleEmbeddings = await this.embedTitles(filteredTitles, priority);
 
     const phraseTexts = phrases.map(p => p.phrase);
-    const phraseEmbeddings = await this.provider.embedBatch(phraseTexts);
+    const phraseEmbeddings = await this.provider.embedBatch(phraseTexts, { priority });
 
     let titleSparseEmbeddings: Map<string, Float32Array> | undefined;
     let phraseSparseEmbeddings: Float32Array[] | undefined;
@@ -109,12 +111,15 @@ export class EmbeddingResolver {
     return result;
   }
 
-  private async embedTitles(titles: string[]): Promise<Map<string, Float32Array>> {
+  private async embedTitles(
+    titles: string[],
+    priority: EmbeddingPriority = "normal",
+  ): Promise<Map<string, Float32Array>> {
     const titleSet = new Set(titles);
 
     const toEmbed = titles.filter(t => !this.titleEmbeddingCache.has(t));
     if (toEmbed.length > 0) {
-      const embeddings = await this.provider.embedBatch(toEmbed);
+      const embeddings = await this.provider.embedBatch(toEmbed, { priority });
       for (let i = 0; i < toEmbed.length; i++) {
         this.titleEmbeddingCache.set(toEmbed[i], embeddings[i]);
       }

@@ -2,12 +2,24 @@
  * Embedding provider interface and implementations for dense vector embeddings.
  */
 
+export type EmbeddingPriority = "high" | "normal";
+
+export interface EmbeddingRequestOptions {
+  priority?: EmbeddingPriority;
+}
+
 export interface EmbeddingProvider {
-  embed(text: string): Promise<Float32Array>;
-  embedBatch(texts: string[]): Promise<Float32Array[]>;
+  embed(text: string, options?: EmbeddingRequestOptions): Promise<Float32Array>;
+  embedBatch(texts: string[], options?: EmbeddingRequestOptions): Promise<Float32Array[]>;
   readonly dims: number;
   dispose(): Promise<void>;
 }
+
+export type EmbeddingProgressEvent =
+  | { type: "download"; file: string; pct: number }
+  | { type: "ready" };
+
+export type EmbeddingProgressListener = (ev: EmbeddingProgressEvent) => void;
 
 // ── TransformersIframeProvider ─────────────────────────────────────────
 
@@ -26,17 +38,36 @@ function buildIframeSrcdoc(model: string): string {
 import { pipeline, env } from "${CDN_URL}";
 
 env.allowLocalModels = false;
-env.useBrowserCache = true;
+env.useBrowserCache = false;
 
 let extractor = null;
+let extractorPromise = null;
+
+function logToParent(msg) {
+  parent.postMessage({ id: "__log__", result: msg }, "*");
+}
 
 async function getExtractor() {
-  if (!extractor) {
-    extractor = await pipeline("feature-extraction", "${model}", {
+  if (extractor) return extractor;
+  if (!extractorPromise) {
+    logToParent("loading model (first request, may download ~30MB)…");
+    const t0 = performance.now();
+    extractorPromise = pipeline("feature-extraction", "${model}", {
       quantized: true,
+      progress_callback: (p) => {
+        if (p && p.status === "progress" && p.file) {
+          logToParent(\`downloading \${p.file}: \${Math.round(p.progress || 0)}%\`);
+        } else if (p && p.status === "ready") {
+          logToParent("model ready");
+        }
+      },
+    }).then((ext) => {
+      logToParent(\`model loaded in \${Math.round(performance.now() - t0)}ms\`);
+      extractor = ext;
+      return ext;
     });
   }
-  return extractor;
+  return extractorPromise;
 }
 
 window.addEventListener("message", async (event) => {
@@ -71,6 +102,28 @@ interface PendingRequest {
 }
 
 /**
+ * Two-priority FIFO queue: `high` entries drain before `normal` ones, while
+ * preserving FIFO order within a priority. Used to serialize embedding work
+ * against the single-threaded iframe pipeline while letting user-facing
+ * requests cut ahead of bulk indexing.
+ */
+class PriorityQueue<T> {
+  private buckets: Record<EmbeddingPriority, T[]> = { high: [], normal: [] };
+
+  push(priority: EmbeddingPriority, item: T): void {
+    this.buckets[priority].push(item);
+  }
+
+  shift(): T | undefined {
+    return this.buckets.high.shift() ?? this.buckets.normal.shift();
+  }
+
+  get size(): number {
+    return this.buckets.high.length + this.buckets.normal.length;
+  }
+}
+
+/**
  * Runs @huggingface/transformers inside a hidden iframe for WASM isolation.
  * Communication via postMessage with promise-based request/response matching.
  */
@@ -82,14 +135,30 @@ export class TransformersIframeProvider implements EmbeddingProvider {
   private readyPromise: Promise<void> | null = null;
   private nextId = 0;
   private model: string;
+  private modelLoaded = false;
+  private progressListener: EmbeddingProgressListener | null = null;
+  // Serialize requests: the ONNX pipeline in the iframe is single-threaded, so
+  // concurrent posts just interleave and make per-request timers fire on work
+  // that hasn't started yet. `high` drains before `normal` so user-facing work
+  // (active file, approve-triggered reprocess) at worst waits for the single
+  // batch currently in flight.
+  private queue = new PriorityQueue<() => Promise<void>>();
+  private draining = false;
 
   constructor(model: string = DEFAULT_MODEL, dims: number = DEFAULT_DIMS) {
     this.model = model;
     this.dims = dims;
   }
 
+  onProgress(listener: EmbeddingProgressListener | null): void {
+    this.progressListener = listener;
+  }
+
   private ensureIframe(): Promise<void> {
     if (this.readyPromise) return this.readyPromise;
+
+    console.log(`Nexus: initializing embedding iframe (model=${this.model})`);
+    const t0 = performance.now();
 
     this.readyPromise = new Promise<void>((resolve, reject) => {
       const iframe = document.createElement("iframe");
@@ -98,7 +167,10 @@ export class TransformersIframeProvider implements EmbeddingProvider {
       iframe.srcdoc = buildIframeSrcdoc(this.model);
       this.iframe = iframe;
 
-      const timer = setTimeout(() => reject(new Error("Iframe initialization timed out")), 30_000);
+      const timer = setTimeout(
+        () => reject(new Error("Iframe initialization timed out (30s)")),
+        30_000,
+      );
 
       this.messageHandler = (event: MessageEvent) => {
         const { id, result, error } = event.data ?? {};
@@ -106,7 +178,16 @@ export class TransformersIframeProvider implements EmbeddingProvider {
 
         if (id === "__ready__") {
           clearTimeout(timer);
+          console.log(
+            `Nexus: embedding iframe ready (${Math.round(performance.now() - t0)}ms)`,
+          );
           resolve();
+          return;
+        }
+
+        if (id === "__log__") {
+          console.log(`Nexus: [iframe] ${result}`);
+          this.emitProgressFromLog(String(result));
           return;
         }
 
@@ -123,36 +204,85 @@ export class TransformersIframeProvider implements EmbeddingProvider {
 
       window.addEventListener("message", this.messageHandler);
       document.body.appendChild(iframe);
-
+      console.log("Nexus: embedding iframe appended, waiting for model download…");
     });
 
     return this.readyPromise;
   }
 
-  private async postMessage<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  private async postMessage<T>(
+    method: string,
+    params: Record<string, unknown>,
+    priority: EmbeddingPriority = "normal",
+  ): Promise<T> {
     await this.ensureIframe();
-    const id = `emb_${this.nextId++}`;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.iframe!.contentWindow!.postMessage({ id, method, params }, "*");
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id);
-          reject(new Error(`Embedding request ${id} timed out`));
-        }
-      }, 60_000);
+      const task = () => {
+        const id = `emb_${this.nextId++}`;
+        // First request carries the model download; give it much more headroom.
+        const timeoutMs = this.modelLoaded ? 60_000 : 300_000;
+        return new Promise<void>((done) => {
+          this.pending.set(id, {
+            resolve: (v) => {
+              this.modelLoaded = true;
+              resolve(v as T);
+              done();
+            },
+            reject: (e) => {
+              reject(e);
+              done();
+            },
+          });
+          this.iframe!.contentWindow!.postMessage({ id, method, params }, "*");
+          setTimeout(() => {
+            if (this.pending.has(id)) {
+              this.pending.delete(id);
+              reject(new Error(`Embedding request ${id} timed out after ${timeoutMs}ms`));
+              done();
+            }
+          }, timeoutMs);
+        });
+      };
+      this.queue.push(priority, task);
+      void this.drain();
     });
   }
 
-  async embed(text: string): Promise<Float32Array> {
-    const results = await this.embedBatch([text]);
+  private async drain(): Promise<void> {
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      while (this.queue.size > 0) {
+        const next = this.queue.shift();
+        if (!next) break;
+        await next();
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  async embed(text: string, options?: EmbeddingRequestOptions): Promise<Float32Array> {
+    const results = await this.embedBatch([text], options);
     return results[0];
   }
 
-  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+  async embedBatch(texts: string[], options?: EmbeddingRequestOptions): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-    const raw = await this.postMessage<number[][]>("embed_batch", { texts });
+    const raw = await this.postMessage<number[][]>("embed_batch", { texts }, options?.priority);
     return raw.map(arr => new Float32Array(arr));
+  }
+
+  private emitProgressFromLog(msg: string): void {
+    if (!this.progressListener) return;
+    const m = msg.match(/^downloading (\S+): (\d+)%$/);
+    if (m) {
+      this.progressListener({ type: "download", file: m[1], pct: parseInt(m[2], 10) });
+      return;
+    }
+    if (msg === "model ready") {
+      this.progressListener({ type: "ready" });
+    }
   }
 
   async dispose(): Promise<void> {
