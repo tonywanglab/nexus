@@ -1,9 +1,39 @@
-import { CandidateEdge, phraseKey } from "../types";
+import { CandidateEdge, MatchType, Resolver, phraseKey } from "../types";
+
+const TYPE_TO_RESOLVER: Record<string, Resolver | undefined> = {
+  deterministic: "lcs",
+  stochastic: "dense",
+  "sparse-feature": "sparse",
+};
+
+const SIMILARITY_FIELD: Record<Resolver, "lcsSimilarity" | "denseSimilarity" | "sparseSimilarity"> = {
+  lcs: "lcsSimilarity",
+  dense: "denseSimilarity",
+  sparse: "sparseSimilarity",
+};
+
+function resolverOf(edge: CandidateEdge): Resolver | null {
+  if (edge.matchedBy && edge.matchedBy.length === 1) return edge.matchedBy[0];
+  const r = edge.matchType ? TYPE_TO_RESOLVER[edge.matchType] : undefined;
+  return r ?? null;
+}
+
+function legacyMatchType(matchedBy: Resolver[]): MatchType {
+  if (matchedBy.length === 1) {
+    const r = matchedBy[0];
+    return r === "lcs" ? "deterministic" : r === "dense" ? "stochastic" : "sparse-feature";
+  }
+  if (matchedBy.length === 2 && matchedBy.includes("lcs") && matchedBy.includes("dense")) {
+    return "both";
+  }
+  return "mixed";
+}
 
 /**
- * Merges LCS + embedding edges with the same (phraseKey, targetId).
- * On collision, keeps the higher similarity as `similarity`, widens matchType
- * to "both", and preserves both raw scores in lcsSimilarity / embSimilarity.
+ * Merges LCS + dense + sparse edges with the same (phraseKey, targetId).
+ * On collision, unions `matchedBy`, keeps each resolver's score in its own
+ * similarity field, carries forward `sparseFeatures` when present, and sets
+ * aggregate `similarity` to the max across contributors.
  * Output is sorted by similarity descending.
  */
 export function mergeByTarget(edges: CandidateEdge[]): CandidateEdge[] {
@@ -11,29 +41,33 @@ export function mergeByTarget(edges: CandidateEdge[]): CandidateEdge[] {
 
   for (const edge of edges) {
     const key = `${phraseKey(edge.phrase.phrase)}|${edge.targetId ?? edge.targetPath}`;
+    const resolver = resolverOf(edge);
     const existing = map.get(key);
 
     if (!existing) {
-      const entry = { ...edge };
-      if (edge.matchType === "deterministic") {
-        entry.lcsSimilarity = edge.similarity;
-      } else if (edge.matchType === "stochastic") {
-        entry.embSimilarity = edge.similarity;
+      const entry: CandidateEdge = { ...edge };
+      if (resolver) {
+        entry.matchedBy = [resolver];
+        entry[SIMILARITY_FIELD[resolver]] = edge.similarity;
       }
+      entry.matchType = entry.matchedBy ? legacyMatchType(entry.matchedBy) : edge.matchType;
       map.set(key, entry);
       continue;
     }
 
-    // Merge — widen to "both" and keep each resolver's score.
-    const lcs =
-      edge.matchType === "deterministic" ? edge.similarity : existing.lcsSimilarity;
-    const emb =
-      edge.matchType === "stochastic" ? edge.similarity : existing.embSimilarity;
-
-    existing.matchType = "both";
-    existing.lcsSimilarity = lcs;
-    existing.embSimilarity = emb;
-    existing.similarity = Math.max(lcs ?? 0, emb ?? 0);
+    if (resolver && !(existing.matchedBy ?? []).includes(resolver)) {
+      existing.matchedBy = [...(existing.matchedBy ?? []), resolver];
+      existing[SIMILARITY_FIELD[resolver]] = edge.similarity;
+    }
+    if (edge.sparseFeatures && !existing.sparseFeatures) {
+      existing.sparseFeatures = edge.sparseFeatures;
+    }
+    existing.matchType = existing.matchedBy ? legacyMatchType(existing.matchedBy) : existing.matchType;
+    existing.similarity = Math.max(
+      existing.lcsSimilarity ?? 0,
+      existing.denseSimilarity ?? 0,
+      existing.sparseSimilarity ?? 0,
+    );
   }
 
   return [...map.values()].sort((a, b) => b.similarity - a.similarity);

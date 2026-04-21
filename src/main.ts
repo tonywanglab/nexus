@@ -6,6 +6,7 @@ import { AliasResolver } from "./resolver";
 import { EmbeddingResolver } from "./resolver/embedding-resolver";
 import { TransformersIframeProvider, EmbeddingProvider } from "./resolver/embedding-provider";
 import { loadBundledSAE } from "./resolver/sae-weights";
+import { SAEFeatureLabels } from "./resolver/sae-feature-labels";
 import { VaultContext } from "./types";
 import { NoteRegistry } from "./note-registry";
 import { EdgeStore } from "./edge-store";
@@ -23,6 +24,7 @@ export default class NexusPlugin extends Plugin {
   private resolver!: AliasResolver;
   private embeddingResolver!: EmbeddingResolver;
   private embeddingProvider!: EmbeddingProvider;
+  private featureLabels!: SAEFeatureLabels;
   private noteRegistry!: NoteRegistry;
   private edgeStore!: EdgeStore;
   private indexingProgress: { toast: ProgressToast; pending: Set<string> } | null = null;
@@ -48,8 +50,9 @@ export default class NexusPlugin extends Plugin {
     this.embeddingProvider = new TransformersIframeProvider();
     this.wireModelDownloadNotice();
     const sae = loadBundledSAE();
+    this.featureLabels = new SAEFeatureLabels();
     console.log(
-      `Nexus: loaded SAE (d_model=${sae.dModel}, d_hidden=${sae.dHidden}, k=${sae.k})`,
+      `Nexus: loaded SAE (d_model=${sae.dModel}, d_hidden=${sae.dHidden}, k=${sae.k}), feature labels: ${this.featureLabels.liveCount}/${sae.dHidden} live`,
     );
     this.embeddingResolver = new EmbeddingResolver({
       embeddingProvider: this.embeddingProvider,
@@ -126,7 +129,30 @@ export default class NexusPlugin extends Plugin {
           sourceId,
           targetId: basenameToId.get(e.targetPath),
         }));
-        const merged = mergeByTarget([...annotated, ...annotatedEmb]);
+
+        let annotatedSparse: typeof annotatedEmb = [];
+        try {
+          const sparseT0 = performance.now();
+          const sparseEdges = await this.embeddingResolver.resolveBySparseFeatures(
+            phrases,
+            noteTitles,
+            job.filePath,
+            this.featureLabels,
+            { similarityThreshold: 0.75, priority: job.priority },
+          );
+          console.log(
+            `Nexus:   ${sparseEdges.length} sparse feature edge(s) (${Math.round(performance.now() - sparseT0)}ms)`,
+          );
+          annotatedSparse = sparseEdges.map((e) => ({
+            ...e,
+            sourceId,
+            targetId: basenameToId.get(e.targetPath),
+          }));
+        } catch (sparseErr) {
+          console.warn("Nexus: sparse resolver failed:", sparseErr);
+        }
+
+        const merged = mergeByTarget([...annotated, ...annotatedEmb, ...annotatedSparse]);
         this.edgeStore.setEdgesForFile(sourceId, merged, file.stat.mtime);
         console.log(
           `Nexus: done ${job.filePath} (${merged.length} merged edge(s), ${Math.round(performance.now() - t0)}ms)`,
