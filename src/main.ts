@@ -5,6 +5,7 @@ import { SpanExtractor } from "./keyphrase/span-extractor";
 import { AliasResolver } from "./resolver";
 import { EmbeddingResolver } from "./resolver/embedding-resolver";
 import { TransformersIframeProvider, EmbeddingProvider } from "./resolver/embedding-provider";
+import { loadBundledSAE } from "./resolver/sae-weights";
 import { VaultContext } from "./types";
 
 export default class NexusPlugin extends Plugin {
@@ -21,8 +22,13 @@ export default class NexusPlugin extends Plugin {
     this.extractor = new SpanExtractor();
     this.resolver = new AliasResolver();
     this.embeddingProvider = new TransformersIframeProvider();
+    const sae = loadBundledSAE();
+    console.log(
+      `Nexus: loaded SAE (d_model=${sae.dModel}, d_hidden=${sae.dHidden}, k=${sae.k})`,
+    );
     this.embeddingResolver = new EmbeddingResolver({
       embeddingProvider: this.embeddingProvider,
+      sae,
     });
 
     this.jobQueue = new JobQueue(async (job) => {

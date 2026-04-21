@@ -4,3 +4,10 @@ main.js
 *.js.map
 dist/
 .env
+
+# SAE training artifacts (dumps + intermediate caches). The final
+# assets/sae-weights.bin is tracked (small, shipped with the plugin).
+data/wiki/
+*.f32.bin
+*.xml.bz2
+*.gz
