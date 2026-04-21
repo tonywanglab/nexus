@@ -1,4 +1,4 @@
-import { Vault, TFile, TFolder } from "./__mocks__/obsidian";
+import { Vault, TFile, TFolder } from "obsidian";
 import { EventListener, VaultEvent, VaultEventCallback } from "../event-listener";
 
 function setup(cb?: VaultEventCallback) {

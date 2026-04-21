@@ -57,6 +57,30 @@ export class JobQueue {
     this.pending.set(filePath, { timer, job });
   }
 
+  /** Like enqueue but bypasses the cooldown gate — for settings-triggered bulk reprocess. */
+  forceEnqueue(filePath: string, type: JobType): void {
+    const existing = this.pending.get(filePath);
+    if (existing) clearTimeout(existing.timer);
+
+    const isActive = filePath === this.activeFile;
+    const delay = isActive ? this.priorityDebounceMs : this.debounceMs;
+
+    const job: QueueJob = {
+      filePath,
+      type,
+      priority: isActive ? "high" : "normal",
+      enqueuedAt: Date.now(),
+    };
+
+    const timer = setTimeout(() => {
+      this.pending.delete(filePath);
+      this.lastProcessed.set(filePath, Date.now());
+      this.onProcess(job); // no cooldown check
+    }, delay);
+
+    this.pending.set(filePath, { timer, job });
+  }
+
   cancel(filePath: string): void {
     const entry = this.pending.get(filePath);
     if (entry) {
