@@ -22,6 +22,7 @@ import { YakeLite } from "../src/keyphrase/yake-lite";
 import { AliasResolver } from "../src/resolver/index";
 import { EmbeddingResolver } from "../src/resolver/embedding-resolver";
 import { EmbeddingProvider } from "../src/resolver/embedding-provider";
+import { meanPoolNormalizeL2FromLastHidden } from "../src/resolver/gemma-embedding";
 import { SparseAutoencoder } from "../src/resolver/sae";
 import { SAEFeatureLabels } from "../src/resolver/sae-feature-labels";
 import { cosineSimilarity } from "../src/resolver/cosine";
@@ -339,30 +340,12 @@ class GemmaEmbeddingProvider implements EmbeddingProvider {
     for (const text of texts) {
       const inputs = await this.tokenizer(text, { padding: true, truncation: true });
       const output = await this.model(inputs);
-      // EmbeddingGemma outputs last_hidden_state; take mean pooling
       const embeddings = output.last_hidden_state;
-      const dims = embeddings.dims;  // [batch, seq_len, hidden_dim]
+      const dims = embeddings.dims as number[];
       const data = embeddings.data as Float32Array;
       const seqLen = dims[1];
       const hiddenDim = dims[2];
-      // Mean pooling over sequence length
-      const pooled = new Float32Array(hiddenDim);
-      for (let s = 0; s < seqLen; s++) {
-        for (let d = 0; d < hiddenDim; d++) {
-          pooled[d] += data[s * hiddenDim + d];
-        }
-      }
-      // Normalize
-      let norm = 0;
-      for (let d = 0; d < hiddenDim; d++) {
-        pooled[d] /= seqLen;
-        norm += pooled[d] * pooled[d];
-      }
-      norm = Math.sqrt(norm);
-      if (norm > 0) {
-        for (let d = 0; d < hiddenDim; d++) pooled[d] /= norm;
-      }
-      results.push(pooled);
+      results.push(meanPoolNormalizeL2FromLastHidden(data, seqLen, hiddenDim));
     }
     return results;
   }
