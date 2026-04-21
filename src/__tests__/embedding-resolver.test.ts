@@ -5,6 +5,7 @@ import {
 } from "../resolver/normalization";
 import { EmbeddingProvider } from "../resolver/embedding-provider";
 import { EmbeddingResolver } from "../resolver/embedding-resolver";
+import { SparseAutoencoder } from "../resolver/sae";
 import { ExtractedPhrase } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -248,5 +249,82 @@ describe("EmbeddingResolver", () => {
     const edges = await strictResolver.resolve(phrases, titles, "note.md");
 
     expect(edges).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EmbeddingResolver with SAE
+// ---------------------------------------------------------------------------
+describe("EmbeddingResolver with SAE", () => {
+  const provider = new MockEmbeddingProvider(8);
+  const sae = SparseAutoencoder.randomInit(8, 32, 4, 99);
+
+  it("produces sparse embeddings alongside dense candidates", async () => {
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.5,
+      sae,
+    });
+
+    const phrases = [makePhrase("alpha", 0.3), makePhrase("beta", 0.3)];
+    const titles = ["alpha", "gamma"];
+    const result = await resolver.resolveWithSparse(phrases, titles, "note.md");
+
+    expect(result.titleSparseEmbeddings).toBeDefined();
+    expect(result.phraseSparseEmbeddings).toBeDefined();
+    expect(result.titleSparseEmbeddings!.size).toBe(titles.length);
+    expect(result.phraseSparseEmbeddings!.length).toBe(phrases.length);
+
+    // Each sparse vector must have length dHidden and ≤ k non-zeros.
+    for (const vec of result.titleSparseEmbeddings!.values()) {
+      expect(vec.length).toBe(sae.dHidden);
+      let nonzero = 0;
+      for (let i = 0; i < vec.length; i++) if (vec[i] !== 0) nonzero++;
+      expect(nonzero).toBeLessThanOrEqual(sae.k);
+    }
+    for (const vec of result.phraseSparseEmbeddings!) {
+      expect(vec.length).toBe(sae.dHidden);
+      let nonzero = 0;
+      for (let i = 0; i < vec.length; i++) if (vec[i] !== 0) nonzero++;
+      expect(nonzero).toBeLessThanOrEqual(sae.k);
+    }
+  });
+
+  it("returns the same candidates whether or not the SAE is attached", async () => {
+    const baseline = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.5,
+    });
+    const withSAE = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.5,
+      sae,
+    });
+    const phrases = [makePhrase("alpha", 0.3), makePhrase("beta", 0.4)];
+    const titles = ["alpha", "gamma", "delta"];
+
+    const a = await baseline.resolve(phrases, titles, "note.md");
+    const b = await withSAE.resolve(phrases, titles, "note.md");
+
+    expect(b).toHaveLength(a.length);
+    for (let i = 0; i < a.length; i++) {
+      expect(b[i].targetPath).toBe(a[i].targetPath);
+      expect(b[i].phrase.phrase).toBe(a[i].phrase.phrase);
+      expect(b[i].similarity).toBeCloseTo(a[i].similarity, 6);
+    }
+  });
+
+  it("resolveWithSparse returns undefined sparse maps when no SAE", async () => {
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.5,
+    });
+    const result = await resolver.resolveWithSparse(
+      [makePhrase("alpha", 0.3)],
+      ["alpha"],
+      "note.md",
+    );
+    expect(result.titleSparseEmbeddings).toBeUndefined();
+    expect(result.phraseSparseEmbeddings).toBeUndefined();
   });
 });
