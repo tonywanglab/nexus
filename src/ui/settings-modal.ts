@@ -79,6 +79,44 @@ export class NexusSettingsModal extends Modal {
         }
       }
     });
+
+    const divider = contentEl.createEl("div");
+    divider.style.borderTop = "1px solid var(--background-modifier-border)";
+    divider.style.margin = "16px 0";
+
+    const desc = contentEl.createEl("p", {
+      text: "Force re-process every note through all resolvers (LCS, Dense, Sparse). Use this after upgrading Nexus to pick up new resolver output.",
+    });
+    desc.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+
+    const reindexAllBtn = contentEl.createEl("button", {
+      text: "Reindex all notes",
+      cls: "nexus-btn",
+    });
+    reindexAllBtn.addEventListener("click", async () => {
+      const ids = this.registry.allIds();
+      const confirmed = await ConfirmModal.prompt(
+        this.app,
+        `This will re-process all ${ids.length} note${ids.length !== 1 ? "s" : ""}. Continue?`,
+      );
+      if (!confirmed) return;
+
+      const toast = new ProgressToast(ids.length, "reindexing", "reindex complete.");
+      let processed = 0;
+      const unsub = this.store.subscribe(() => {
+        processed++;
+        toast.tick();
+        if (processed >= ids.length) unsub();
+      });
+
+      for (const id of ids) {
+        const path = this.registry.getPath(id);
+        if (path) {
+          this.store.clearEdgesForFile(id);
+          this.queue.forceEnqueue(path, "process");
+        }
+      }
+    });
   }
 
   onClose(): void {

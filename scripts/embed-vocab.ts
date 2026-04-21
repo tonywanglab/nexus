@@ -1,7 +1,7 @@
 #!/usr/bin/env npx ts-node
 /**
  * Embed the Numberbatch vocabulary (one concept per line from build-vocab.ts)
- * using the same Arctic model the plugin uses at runtime. Writes a raw Float32 LE
+ * using the same embedding model as the plugin (default EmbeddingGemma). Writes a raw Float32 LE
  * blob of shape [vocabSize, dims] and a manifest, resumable if interrupted.
  *
  * Usage:
@@ -13,7 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as crypto from "crypto";
-import { PipelineEmbeddingProvider } from "./lib/node-providers";
+import { createNodeEmbeddingProvider } from "./lib/node-providers";
 
 const FLOAT_SIZE = 4;
 
@@ -51,8 +51,8 @@ function parseCli(argv: string[]): CliOptions {
     input: str("input", "data/vocab.txt"),
     output: str("output", "data/vocab-embeddings.f32.bin"),
     manifest: str("manifest", "data/vocab-manifest.json"),
-    model: str("model", "Snowflake/snowflake-arctic-embed-xs"),
-    dims: num("dims", 384),
+    model: str("model", "onnx-community/embeddinggemma-300m-ONNX"),
+    dims: num("dims", 768),
     batchSize: num("batch-size", 64),
     flushEvery: num("flush-every", 5_000),
   };
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const provider = new PipelineEmbeddingProvider(opts.model, opts.dims);
+  const provider = createNodeEmbeddingProvider(opts.model, opts.dims);
   const fd = fs.openSync(opts.output, rowsWritten > 0 ? "a" : "w");
 
   const now = new Date().toISOString();
