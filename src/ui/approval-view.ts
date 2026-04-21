@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
-import { CandidateEdge, NoteId } from "../types";
+import { CandidateEdge, NoteId, Resolver } from "../types";
 import { EdgeStore } from "../edge-store";
 
 export const APPROVAL_VIEW_TYPE = "nexus-approval";
@@ -10,10 +10,32 @@ export interface CardVM {
   targetTitle: string;
   similarity: number;
   similarityLabel: string;
-  badge: "lcs" | "emb" | "lcs+emb";
+  badge: string;
   scoreDetail?: string;
   sourceId: NoteId;
   targetId: NoteId;
+}
+
+/**
+ * Read contributing resolvers from an edge, falling back to legacy `matchType`
+ * for edges persisted before `matchedBy` existed.
+ */
+export function resolversOf(edge: CandidateEdge): Resolver[] {
+  if (edge.matchedBy && edge.matchedBy.length > 0) return edge.matchedBy;
+  switch (edge.matchType) {
+    case "deterministic": return ["lcs"];
+    case "stochastic": return ["dense"];
+    case "sparse-feature": return ["sparse"];
+    case "both": return ["lcs", "dense"];
+    default: return [];
+  }
+}
+
+const RESOLVER_ORDER: Resolver[] = ["lcs", "dense", "sparse"];
+
+function orderedResolvers(rs: Resolver[]): Resolver[] {
+  const set = new Set(rs);
+  return RESOLVER_ORDER.filter((r) => set.has(r));
 }
 
 export function buildCardViewModel(
@@ -23,18 +45,19 @@ export function buildCardViewModel(
   return [...edges]
     .sort((a, b) => b.similarity - a.similarity)
     .map((e) => {
-      let badge: CardVM["badge"];
-      let scoreDetail: string | undefined;
+      const resolvers = orderedResolvers(resolversOf(e));
+      const badge = resolvers.length > 0 ? resolvers.join("+") : "lcs";
 
-      if (e.matchType === "both") {
-        badge = "lcs+emb";
-        const lcs = e.lcsSimilarity?.toFixed(2) ?? "?";
-        const emb = e.embSimilarity?.toFixed(2) ?? "?";
-        scoreDetail = `lcs ${lcs} · emb ${emb}`;
-      } else if (e.matchType === "stochastic") {
-        badge = "emb";
-      } else {
-        badge = "lcs";
+      let scoreDetail: string | undefined;
+      if (resolvers.length > 1) {
+        const parts: string[] = [];
+        for (const r of resolvers) {
+          const score = r === "lcs" ? e.lcsSimilarity
+            : r === "dense" ? e.denseSimilarity
+            : e.sparseSimilarity;
+          parts.push(`${r} ${score?.toFixed(2) ?? "?"}`);
+        }
+        scoreDetail = parts.join(" · ");
       }
 
       return {
@@ -51,18 +74,15 @@ export function buildCardViewModel(
     });
 }
 
-export type EdgeTab = "lcs" | "emb";
+export type EdgeTab = Resolver;
 
 /**
  * Predicate for the sidebar tab filter. An edge "belongs to" a tab when the
- * tab's resolver contributed to it — so `both` edges show up under both tabs
- * rather than being hidden.
+ * tab's resolver contributed to it — so multi-resolver edges show up under
+ * every contributing tab rather than being hidden.
  */
 export function matchesTab(tab: EdgeTab): (e: CandidateEdge) => boolean {
-  return (e) => {
-    if (tab === "lcs") return e.matchType === "deterministic" || e.matchType === "both";
-    return e.matchType === "stochastic" || e.matchType === "both";
-  };
+  return (e) => resolversOf(e).includes(tab);
 }
 
 export class NexusApprovalView extends ItemView {
@@ -130,18 +150,21 @@ export class NexusApprovalView extends ItemView {
 
     const edges = this.store.getEdgesForFile(activeId);
     const lcsCount = edges.filter(matchesTab("lcs")).length;
-    const embCount = edges.filter(matchesTab("emb")).length;
-    this.renderTabs(el, lcsCount, embCount);
+    const denseCount = edges.filter(matchesTab("dense")).length;
+    const sparseCount = edges.filter(matchesTab("sparse")).length;
+    this.renderTabs(el, lcsCount, denseCount, sparseCount);
 
     const filtered = edges.filter(matchesTab(this.activeTab));
     const cards = buildCardViewModel(filtered, activeId);
 
     if (cards.length === 0) {
+      const emptyText: Record<EdgeTab, string> = {
+        lcs: "No LCS candidates for this note.",
+        dense: "No dense embedding candidates for this note.",
+        sparse: "No sparse candidates for this note.",
+      };
       el.createEl("p", {
-        text:
-          this.activeTab === "lcs"
-            ? "No LCS candidates for this note."
-            : "No embedding candidates for this note.",
+        text: emptyText[this.activeTab] ?? "No candidates for this note.",
         cls: "nexus-empty",
       });
       return;
@@ -154,7 +177,7 @@ export class NexusApprovalView extends ItemView {
     }
   }
 
-  private renderTabs(container: any, lcsCount: number, embCount: number): void {
+  private renderTabs(container: any, lcsCount: number, denseCount: number, sparseCount: number): void {
     const tabs = container.createEl("div", { cls: "nexus-tabs" });
     tabs.style.display = "flex";
     tabs.style.gap = "4px";
@@ -176,7 +199,8 @@ export class NexusApprovalView extends ItemView {
       });
     };
     mk("lcs", "LCS", lcsCount);
-    mk("emb", "Embeddings", embCount);
+    mk("dense", "Dense", denseCount);
+    mk("sparse", "Sparse", sparseCount);
   }
 
   private renderToolbar(container: any): void {
