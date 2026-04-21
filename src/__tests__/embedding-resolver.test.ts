@@ -6,7 +6,17 @@ import {
 import { EmbeddingProvider } from "../resolver/embedding-provider";
 import { EmbeddingResolver } from "../resolver/embedding-resolver";
 import { SparseAutoencoder } from "../resolver/sae";
+import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { ExtractedPhrase } from "../types";
+
+// Stub the labels JSON so the test is deterministic — all 32 features get labels.
+jest.mock("../../assets/sae-feature-labels.json", () => {
+  const labels = Array.from({ length: 32 }, (_, i) => ({
+    candidates: [`concept${i}`, `word${i}`, `idea${i}`],
+    scores: [0.9 - i * 0.01, 0.8 - i * 0.01, 0.7 - i * 0.01],
+  }));
+  return { dHidden: 32, vocabSize: 100, vocabSource: "test", minScore: 0.25, labelsPerFeature: 3, labels };
+}, { virtual: true });
 
 // ---------------------------------------------------------------------------
 // MockEmbeddingProvider (test-only)
@@ -326,5 +336,97 @@ describe("EmbeddingResolver with SAE", () => {
     );
     expect(result.titleSparseEmbeddings).toBeUndefined();
     expect(result.phraseSparseEmbeddings).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EmbeddingResolver.resolveBySparseFeatures
+// ---------------------------------------------------------------------------
+describe("EmbeddingResolver.resolveBySparseFeatures", () => {
+  const provider = new MockEmbeddingProvider(8);
+  // dModel=8, dHidden=32, k=4 — all 32 features are labeled by the mock JSON above.
+  const sae = SparseAutoencoder.randomInit(8, 32, 4, 99);
+  const featureLabels = new SAEFeatureLabels();
+
+  const resolver = new EmbeddingResolver({
+    embeddingProvider: provider,
+    similarityThreshold: 0.5,
+    sae,
+  });
+
+  it("throws when called without an SAE configured", async () => {
+    const noSAEResolver = new EmbeddingResolver({ embeddingProvider: provider });
+    await expect(
+      noSAEResolver.resolveBySparseFeatures(
+        [makePhrase("alpha")],
+        ["alpha"],
+        "note.md",
+        featureLabels,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("returns empty array for empty phrases or titles", async () => {
+    expect(
+      await resolver.resolveBySparseFeatures([], ["A"], "note.md", featureLabels),
+    ).toEqual([]);
+    expect(
+      await resolver.resolveBySparseFeatures([makePhrase("A")], [], "note.md", featureLabels),
+    ).toEqual([]);
+  });
+
+  it("sets matchType to 'sparse-feature' on every returned edge", async () => {
+    const edges = await resolver.resolveBySparseFeatures(
+      [makePhrase("alpha", 0.3), makePhrase("beta", 0.3)],
+      ["alpha", "gamma"],
+      "note.md",
+      featureLabels,
+      { similarityThreshold: 0 }, // 0 threshold so we always get results
+    );
+    for (const edge of edges) {
+      expect(edge.matchType).toBe("sparse-feature");
+    }
+  });
+
+  it("display payload has at most 4 features per side", async () => {
+    const edges = await resolver.resolveBySparseFeatures(
+      [makePhrase("alpha", 0.3)],
+      ["alpha", "gamma", "delta"],
+      "note.md",
+      featureLabels,
+      { similarityThreshold: 0 },
+    );
+    for (const edge of edges) {
+      expect(edge.sparseFeatures).toBeDefined();
+      expect(edge.sparseFeatures!.phraseFeatures.length).toBeLessThanOrEqual(4);
+      expect(edge.sparseFeatures!.titleFeatures.length).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it("each sparseFeature entry carries a non-empty label string", async () => {
+    const edges = await resolver.resolveBySparseFeatures(
+      [makePhrase("alpha", 0.3)],
+      ["alpha"],
+      "note.md",
+      featureLabels,
+      { similarityThreshold: 0 },
+    );
+    for (const edge of edges) {
+      for (const f of edge.sparseFeatures!.phraseFeatures) {
+        expect(typeof f.label).toBe("string");
+        expect(f.label.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("filters self-links", async () => {
+    const edges = await resolver.resolveBySparseFeatures(
+      [makePhrase("My Note", 0.3)],
+      ["My Note", "Other"],
+      "folder/My Note.md",
+      featureLabels,
+      { similarityThreshold: 0 },
+    );
+    expect(edges.every(e => e.targetPath !== "My Note")).toBe(true);
   });
 });

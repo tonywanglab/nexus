@@ -379,6 +379,24 @@ export function topK(values: Float32Array, k: number): SparseEncoding {
   return { indices: heapIdx, values: heapVals };
 }
 
+/**
+ * Returns the top-n entries of an existing SparseEncoding by activation value.
+ * Preserves Int32Array/Float32Array types. Throws if n > enc.indices.length.
+ */
+export function topNOf(enc: SparseEncoding, n: number): SparseEncoding {
+  const k = enc.indices.length;
+  if (n > k) throw new Error(`topNOf: n=${n} > k=${k}`);
+  const order = Array.from({ length: k }, (_, i) => i)
+    .sort((a, b) => enc.values[b] - enc.values[a]);
+  const outIdx = new Int32Array(n);
+  const outVal = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    outIdx[i] = enc.indices[order[i]];
+    outVal[i] = enc.values[order[i]];
+  }
+  return { indices: outIdx, values: outVal };
+}
+
 function siftDown(vals: Float32Array, idx: Int32Array, start: number, n: number): void {
   let i = start;
   while (true) {

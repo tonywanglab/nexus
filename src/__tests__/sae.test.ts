@@ -1,4 +1,4 @@
-import { SparseAutoencoder, topK, SAEWeights } from "../resolver/sae";
+import { SparseAutoencoder, topK, topNOf, SAEWeights } from "../resolver/sae";
 
 function makeTrivialWeights(
   dModel: number,
@@ -224,6 +224,56 @@ describe("SparseAutoencoder serialize/deserialize round-trip", () => {
   it("rejects invalid magic bytes", () => {
     const bytes = new Uint8Array(16);
     expect(() => SparseAutoencoder.deserialize(bytes)).toThrow();
+  });
+});
+
+describe("topNOf", () => {
+  function makeEncoding(indexValuePairs: [number, number][]) {
+    const indices = new Int32Array(indexValuePairs.map(p => p[0]));
+    const values = new Float32Array(indexValuePairs.map(p => p[1]));
+    return { indices, values };
+  }
+
+  it("returns n highest activations when n < k", () => {
+    const enc = makeEncoding([[5, 9], [2, 3], [7, 6], [1, 1]]);
+    const result = topNOf(enc, 2);
+    expect(result.indices.length).toBe(2);
+    // Top 2 by value: index 5 (val 9) and index 7 (val 6)
+    const pairs = Array.from(result.indices).map((idx, i) => ({ idx, val: result.values[i] }));
+    pairs.sort((a, b) => b.val - a.val);
+    expect(pairs[0].val).toBe(9);
+    expect(pairs[1].val).toBe(6);
+  });
+
+  it("returns all k when n === k", () => {
+    const enc = makeEncoding([[0, 3], [1, 1], [2, 4]]);
+    const result = topNOf(enc, 3);
+    expect(result.indices.length).toBe(3);
+    const seen = new Set(Array.from(result.indices));
+    expect(seen.has(0)).toBe(true);
+    expect(seen.has(1)).toBe(true);
+    expect(seen.has(2)).toBe(true);
+  });
+
+  it("throws when n > k", () => {
+    const enc = makeEncoding([[0, 1], [1, 2]]);
+    expect(() => topNOf(enc, 3)).toThrow();
+  });
+
+  it("preserves Int32Array and Float32Array types", () => {
+    const enc = makeEncoding([[3, 5], [7, 2]]);
+    const result = topNOf(enc, 1);
+    expect(result.indices).toBeInstanceOf(Int32Array);
+    expect(result.values).toBeInstanceOf(Float32Array);
+  });
+
+  it("values in result match the original values at the selected indices", () => {
+    const enc = makeEncoding([[10, 0.7], [20, 0.5], [30, 0.9]]);
+    const result = topNOf(enc, 2);
+    for (let i = 0; i < result.indices.length; i++) {
+      const origPos = Array.from(enc.indices).indexOf(result.indices[i]);
+      expect(result.values[i]).toBeCloseTo(enc.values[origPos], 6);
+    }
   });
 });
 

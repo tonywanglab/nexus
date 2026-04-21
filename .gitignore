@@ -8,6 +8,8 @@ dist/
 # SAE training artifacts (dumps + intermediate caches). The final
 # assets/sae-weights.bin is tracked (small, shipped with the plugin).
 data/wiki/
+data/vocab.txt
+data/vocab-manifest.json
 *.f32.bin
 *.xml.bz2
 *.gz
