@@ -18,7 +18,10 @@
     "eval:yake": "npm run eval -- --extractor=yake",
     "eval:lcs": "npm run eval -- --resolver=lcs",
     "eval:arctic": "npm run eval -- --resolver=arctic",
-    "eval:gemma": "npm run eval -- --resolver=gemma"
+    "eval:gemma": "npm run eval -- --resolver=gemma",
+    "wiki:prepare": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/prepare-wiki-corpus.ts",
+    "wiki:embed": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/embed-corpus.ts",
+    "train:sae": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/train-sae.ts"
   },
   "author": "Tony Wang",
   "license": "MIT",
@@ -27,12 +30,17 @@
   },
   "devDependencies": {
     "@huggingface/transformers": "^4.0.1",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "@types/cli-progress": "^3.11.6",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
+    "@types/sax": "^1.2.7",
     "builtin-modules": "^3.3.0",
+    "cli-progress": "^3.12.0",
     "esbuild": "^0.24.0",
     "jest": "^29.7.0",
     "obsidian": "latest",
+    "sax": "^1.6.0",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
