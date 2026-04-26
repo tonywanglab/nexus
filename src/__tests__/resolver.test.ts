@@ -133,49 +133,49 @@ describe("phraseContainsTitle", () => {
 describe("AliasResolver", () => {
   const resolver = new AliasResolver();
 
-  it("returns empty for empty inputs", () => {
-    expect(resolver.resolve([], [], "note.md")).toEqual([]);
-    expect(resolver.resolve([makePhrase("test")], [], "note.md")).toEqual([]);
-    expect(resolver.resolve([], ["Note Title"], "note.md")).toEqual([]);
+  it("returns empty for empty inputs", async () => {
+    expect(await resolver.resolve([], [], "note.md")).toEqual([]);
+    expect(await resolver.resolve([makePhrase("test")], [], "note.md")).toEqual([]);
+    expect(await resolver.resolve([], ["Note Title"], "note.md")).toEqual([]);
   });
 
-  it("finds exact phrase-to-title match", () => {
+  it("finds exact phrase-to-title match", async () => {
     const phrases = [makePhrase("Machine Learning", 0.3)];
     const titles = ["Machine Learning"];
-    const edges = resolver.resolve(phrases, titles, "notes/ai.md");
+    const edges = await resolver.resolve(phrases, titles, "notes/ai.md");
 
     expect(edges).toHaveLength(1);
     expect(edges[0].targetPath).toBe("Machine Learning");
     expect(edges[0].similarity).toBeGreaterThan(0.9);
   });
 
-  it("finds similar but not exact matches above threshold", () => {
+  it("finds similar but not exact matches above threshold", async () => {
     const phrases = [makePhrase("machin learning", 0.4)];
     const titles = ["Machine Learning"];
-    const edges = resolver.resolve(phrases, titles, "notes/ai.md");
+    const edges = await resolver.resolve(phrases, titles, "notes/ai.md");
 
     expect(edges).toHaveLength(1);
     expect(edges[0].similarity).toBeGreaterThanOrEqual(0.85);
   });
 
-  it("excludes dissimilar titles below threshold", () => {
+  it("excludes dissimilar titles below threshold", async () => {
     const phrases = [makePhrase("quantum physics", 0.5)];
     const titles = ["Banana Bread Recipe"];
-    const edges = resolver.resolve(phrases, titles, "notes/science.md");
+    const edges = await resolver.resolve(phrases, titles, "notes/science.md");
 
     expect(edges).toHaveLength(0);
   });
 
-  it("filters out self-links", () => {
+  it("filters out self-links", async () => {
     const phrases = [makePhrase("My Note", 0.3)];
     const titles = ["My Note", "Other Note"];
-    const edges = resolver.resolve(phrases, titles, "folder/My Note.md");
+    const edges = await resolver.resolve(phrases, titles, "folder/My Note.md");
 
     // Should not include "My Note" as target
     expect(edges.every((e) => e.targetPath !== "My Note")).toBe(true);
   });
 
-  it("respects maxCandidatesPerPhrase", () => {
+  it("respects maxCandidatesPerPhrase", async () => {
     const custom = new AliasResolver({
       maxCandidatesPerPhrase: 1,
       similarityThreshold: 0.1,
@@ -186,49 +186,49 @@ describe("AliasResolver", () => {
       "Deep Learning",
       "Learning Theory",
     ];
-    const edges = custom.resolve(phrases, titles, "note.md");
+    const edges = await custom.resolve(phrases, titles, "note.md");
 
     // With maxCandidatesPerPhrase=1, only best match per phrase
     // (dedup may still reduce further, but can't exceed 1 per phrase)
     expect(edges.length).toBeLessThanOrEqual(1);
   });
 
-  it("deduplicates: same target from multiple phrases keeps best", () => {
+  it("deduplicates: same target from multiple phrases keeps best", async () => {
     const phrases = [
       makePhrase("machine learning", 0.3),
       makePhrase("ML", 0.6),
     ];
     const titles = ["Machine Learning"];
-    const edges = resolver.resolve(phrases, titles, "note.md");
+    const edges = await resolver.resolve(phrases, titles, "note.md");
 
     // Only one edge to "Machine Learning" (from the better match)
     const mlEdges = edges.filter((e) => e.targetPath === "Machine Learning");
     expect(mlEdges).toHaveLength(1);
   });
 
-  it("resolves short phrases (filtering is upstream)", () => {
+  it("resolves short phrases (filtering is upstream)", async () => {
     const phrases = [makePhrase("x", 0.1)];
     const titles = ["x"];
-    const edges = resolver.resolve(phrases, titles, "note.md");
+    const edges = await resolver.resolve(phrases, titles, "note.md");
 
     // Short phrases are no longer filtered here — SpanExtractor handles it
     expect(edges.length).toBeGreaterThanOrEqual(0);
   });
 
-  it("ranks by combined score (similarity × (1 - phraseScore))", () => {
+  it("ranks by combined score (similarity × (1 - phraseScore))", async () => {
     const phrases = [
       makePhrase("neural networks", 0.2), // low phraseScore = high quality
       makePhrase("deep learning", 0.8), // high phraseScore = low quality
     ];
     const titles = ["Neural Networks", "Deep Learning"];
-    const edges = resolver.resolve(phrases, titles, "note.md");
+    const edges = await resolver.resolve(phrases, titles, "note.md");
 
     expect(edges.length).toBe(2);
     // "neural networks" should rank higher due to better phrase quality
     expect(edges[0].phrase.phrase).toBe("neural networks");
   });
 
-  it("inverted-index optimization produces same results as brute-force", () => {
+  it("inverted-index optimization produces same results as brute-force", async () => {
     // Use a low threshold so we can verify the token-based filtering logic
     const lowThreshold = new AliasResolver({ similarityThreshold: 0.3 });
 
@@ -245,7 +245,7 @@ describe("AliasResolver", () => {
       "Quantum Physics",
     ];
 
-    const edges = lowThreshold.resolve(phrases, titles, "notes/overview.md");
+    const edges = await lowThreshold.resolve(phrases, titles, "notes/overview.md");
     const targets = edges.map((e) => e.targetPath);
 
     // Phrases sharing tokens with titles should match
@@ -261,10 +261,10 @@ describe("AliasResolver", () => {
     expect(targets).not.toContain("Lambda Architecture");
   });
 
-  it("similarity stays within [0, 1] with multiplicative boost", () => {
+  it("similarity stays within [0, 1] with multiplicative boost", async () => {
     const phrases = [makePhrase("test", 0.1)];
     const titles = ["test"];
-    const edges = new AliasResolver({
+    const edges = await new AliasResolver({
       similarityThreshold: 0,
       exactMatchBoost: 3.0, // aggressive boost
     }).resolve(phrases, titles, "note.md");

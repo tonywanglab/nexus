@@ -1,7 +1,7 @@
 import { CandidateEdge, ExtractedPhrase } from "../types";
 import { normalizedSimilarity } from "./lcs";
 import { normalize, exactMatch, phraseContainsTitle, excludeSelfTitles } from "./normalization";
-import { dedupAndRank } from "./shared-utils";
+import { dedupAndRank, makeYielder } from "./shared-utils";
 
 export interface ResolverOptions {
   similarityThreshold?: number;
@@ -29,19 +29,21 @@ export class AliasResolver {
     this.opts = { ...DEFAULTS, ...options };
   }
 
-  resolve(
+  async resolve(
     phrases: ExtractedPhrase[],
     noteTitles: string[],
     sourcePath: string,
-  ): CandidateEdge[] {
+  ): Promise<CandidateEdge[]> {
     const filteredTitles = excludeSelfTitles(noteTitles, sourcePath);
     const candidates: CandidateEdge[] = [];
+    const yieldIfNeeded = makeYielder();
 
     // Build token inverted index: token → Set<title>
     const tokenToTitles = new Map<string, Set<string>>();
     const normalizedTitleCache = new Map<string, string>();
 
     for (const title of filteredTitles) {
+      await yieldIfNeeded();
       const nt = normalize(title);
       normalizedTitleCache.set(title, nt);
       for (const token of nt.split(" ")) {
@@ -55,7 +57,9 @@ export class AliasResolver {
       }
     }
 
-    for (const phrase of phrases) {
+    for (let pi = 0; pi < phrases.length; pi++) {
+      await yieldIfNeeded();
+      const phrase = phrases[pi];
       const normalizedPhrase = normalize(phrase.phrase);
       const phraseCandidates: CandidateEdge[] = [];
 
