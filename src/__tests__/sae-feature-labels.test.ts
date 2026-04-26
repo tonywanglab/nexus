@@ -61,6 +61,12 @@ describe("SAEFeatureLabels", () => {
     it("returns null for out-of-range index", () => {
       expect(fl.labelFor(999)).toBeNull();
     });
+
+    it("pads to saeDHidden with empty label slots for higher indices", () => {
+      const padded = new SAEFeatureLabels(10);
+      expect(padded.labelFor(7)).toBeNull();
+      expect(padded.labelFor(0)).toBe("politician · statesman · senator");
+    });
   });
 
   describe("pickTop4Labeled", () => {
