@@ -9,13 +9,62 @@
  *   npm run vocab:embed -- --input=data/vocab.txt --output=data/vocab-embeddings.f32.bin
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import * as readline from "readline";
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { createNodeEmbeddingProvider } from "./lib/node-providers";
+import { readLinesAsync } from "./lib/read-lines";
 
 const FLOAT_SIZE = 4;
+
+function tsLog(line: string): void {
+  process.stderr.write(`[${new Date().toISOString()}] ${line}\n`);
+}
+
+function fmtDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "?";
+  const s = Math.floor(seconds % 60);
+  const m = Math.floor((seconds / 60) % 60);
+  const h = Math.floor(seconds / 3600);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function logRuntimeThreads(device: string): void {
+  const cpuCount = os.cpus().length;
+  const ap =
+    typeof (os as { availableParallelism?: () => number }).availableParallelism === "function"
+      ? (os as { availableParallelism: () => number }).availableParallelism()
+      : cpuCount;
+  tsLog(`Threads/cores: os.cpus().length=${cpuCount}, os.availableParallelism()=${ap}`);
+  tsLog(
+    `libuv pool: UV_THREADPOOL_SIZE=${process.env.UV_THREADPOOL_SIZE ?? "(default 4)"}`,
+  );
+  const threadEnvKeys = [
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+  ] as const;
+  for (const k of threadEnvKeys) {
+    if (process.env[k]) tsLog(`${k}=${process.env[k]}`);
+  }
+  try {
+    const ort = require("onnxruntime-node") as { env?: { wasm?: { numThreads?: number } } };
+    const wt = ort.env?.wasm?.numThreads;
+    tsLog(`onnxruntime env.wasm.numThreads=${wt === undefined ? "(unused in Node native EP)" : String(wt)}`);
+  } catch {
+    tsLog("onnxruntime-node: env not read");
+  }
+  if (device === "coreml") {
+    tsLog(
+      "Inference note: CoreML EP uses Apple ANE/GPU; CPU/thread env vars mainly affect CPU fallback or host work.",
+    );
+  }
+}
 
 interface CliOptions {
   input: string;
@@ -25,6 +74,8 @@ interface CliOptions {
   dims: number;
   batchSize: number;
   flushEvery: number;
+  /** Transformers.js ONNX device (default: coreml on macOS, cpu elsewhere). */
+  device: string;
 }
 
 interface Manifest {
@@ -47,6 +98,7 @@ function parseCli(argv: string[]): CliOptions {
   }
   const num = (k: string, d: number) => (opts[k] ? Number(opts[k]) : d);
   const str = (k: string, d: string) => opts[k] ?? d;
+  const defaultDevice = process.platform === "darwin" ? "coreml" : "cpu";
   return {
     input: str("input", "data/vocab.txt"),
     output: str("output", "data/vocab-embeddings.f32.bin"),
@@ -55,6 +107,7 @@ function parseCli(argv: string[]): CliOptions {
     dims: num("dims", 768),
     batchSize: num("batch-size", 64),
     flushEvery: num("flush-every", 5_000),
+    device: str("device", defaultDevice),
   };
 }
 
@@ -82,8 +135,10 @@ function countLines(p: string): number {
 }
 
 async function main(): Promise<void> {
+  const tPipeline = Date.now();
+  tsLog("embed-vocab starting");
   const opts = parseCli(process.argv);
-  process.stderr.write(`embed-vocab options: ${JSON.stringify(opts, null, 2)}\n`);
+  tsLog(`options: ${JSON.stringify(opts)}`);
 
   if (!fs.existsSync(opts.input)) {
     throw new Error(`Vocab file not found: ${opts.input}. Run npm run vocab:build first.`);
@@ -92,13 +147,15 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.dirname(opts.output), { recursive: true });
   fs.mkdirSync(path.dirname(opts.manifest), { recursive: true });
 
-  process.stderr.write(`Counting vocab lines... `);
-  const totalRows = countLines(opts.input);
-  process.stderr.write(`${totalRows.toLocaleString()}\n`);
+  logRuntimeThreads(opts.device);
 
-  process.stderr.write(`Hashing input file... `);
+  tsLog("Counting vocab lines...");
+  const totalRows = countLines(opts.input);
+  tsLog(`vocab lines: ${totalRows.toLocaleString()} (${fmtDuration((Date.now() - tPipeline) / 1000)} since start)`);
+
+  tsLog("Hashing input file...");
   const inputSha = sha256File(opts.input);
-  process.stderr.write(`${inputSha.slice(0, 16)}...\n`);
+  tsLog(`input sha256: ${inputSha.slice(0, 16)}...`);
 
   const existing = loadManifest(opts.manifest);
   let rowsWritten = 0;
@@ -114,9 +171,9 @@ async function main(): Promise<void> {
       const rowBytes = opts.dims * FLOAT_SIZE;
       if (onDisk % rowBytes === 0) {
         rowsWritten = onDisk / rowBytes;
-        process.stderr.write(`Resuming from row ${rowsWritten.toLocaleString()} / ${totalRows.toLocaleString()}\n`);
+        tsLog(`Resuming from row ${rowsWritten.toLocaleString()} / ${totalRows.toLocaleString()}`);
         if (rowsWritten >= totalRows) {
-          process.stderr.write(`Already complete.\n`);
+          tsLog("Already complete.");
           saveManifest(opts.manifest, { ...existing, complete: true, rowsWritten });
           return;
         }
@@ -124,8 +181,11 @@ async function main(): Promise<void> {
     }
   }
 
-  const provider = createNodeEmbeddingProvider(opts.model, opts.dims);
+  const provider = createNodeEmbeddingProvider(opts.model, opts.dims, { device: opts.device });
   const fd = fs.openSync(opts.output, rowsWritten > 0 ? "a" : "w");
+  const tEmbedStart = Date.now();
+  const rowBase = rowsWritten;
+  tsLog(`Embedding loop starting (rows ${rowBase.toLocaleString()}→${totalRows.toLocaleString()}, batch=${opts.batchSize})`);
 
   const now = new Date().toISOString();
   const manifest: Manifest = {
@@ -141,9 +201,8 @@ async function main(): Promise<void> {
   };
   saveManifest(opts.manifest, manifest);
 
-  const rl = readline.createInterface({ input: fs.createReadStream(opts.input), crlfDelay: Infinity });
   const allLines: string[] = [];
-  for await (const line of rl) {
+  for await (const line of readLinesAsync(opts.input)) {
     if (line.trim()) allLines.push(line.trim());
   }
 
@@ -166,7 +225,14 @@ async function main(): Promise<void> {
       manifest.rowsWritten = done;
       manifest.updatedAt = new Date().toISOString();
       saveManifest(opts.manifest, manifest);
-      process.stderr.write(`${done.toLocaleString()} / ${totalRows.toLocaleString()}\n`);
+      const elapsedSec = (Date.now() - tEmbedStart) / 1000;
+      const sessionRows = done - rowBase;
+      const rps = elapsedSec > 0.5 ? sessionRows / elapsedSec : 0;
+      const remaining = totalRows - done;
+      const etaSec = rps > 0 ? remaining / rps : Number.NaN;
+      tsLog(
+        `progress ${done.toLocaleString()} / ${totalRows.toLocaleString()} | ${rps.toFixed(1)} rows/s (this run) | elapsed ${fmtDuration(elapsedSec)} | ETA ~${fmtDuration(etaSec)}`,
+      );
     }
   }
 
@@ -177,7 +243,9 @@ async function main(): Promise<void> {
   saveManifest(opts.manifest, manifest);
   await provider.dispose();
 
-  process.stderr.write(`Done. Wrote ${totalRows.toLocaleString()} embeddings to ${opts.output}\n`);
+  tsLog(
+    `Done. Wrote ${totalRows.toLocaleString()} embeddings to ${opts.output} (total wall ${fmtDuration((Date.now() - tPipeline) / 1000)})`,
+  );
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

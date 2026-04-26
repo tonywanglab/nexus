@@ -11,9 +11,9 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as readline from "readline";
 import * as crypto from "crypto";
 import { createNodeEmbeddingProvider } from "./lib/node-providers";
+import { readLinesAsync } from "./lib/read-lines";
 
 const FLOAT_SIZE = 4;
 
@@ -25,6 +25,7 @@ interface CliOptions {
   dims: number;
   batchSize: number;
   flushEvery: number;
+  device: string;
 }
 
 function parseCli(argv: string[]): CliOptions {
@@ -35,6 +36,7 @@ function parseCli(argv: string[]): CliOptions {
   }
   const num = (k: string, d: number): number => (opts[k] ? Number(opts[k]) : d);
   const str = (k: string, d: string): string => opts[k] ?? d;
+  const defaultDevice = process.platform === "darwin" ? "coreml" : "cpu";
   return {
     input: str("input", "data/wiki/corpus.txt"),
     output: str("output", "data/wiki/embeddings.f32.bin"),
@@ -43,6 +45,7 @@ function parseCli(argv: string[]): CliOptions {
     dims: num("dims", 768),
     batchSize: num("batch-size", 64),
     flushEvery: num("flush-every", 10_000),
+    device: str("device", defaultDevice),
   };
 }
 
@@ -174,14 +177,9 @@ async function main(): Promise<void> {
   // Open the output file for appending raw Float32 bytes.
   const fd = fs.openSync(opts.output, "a");
 
-  const provider = createNodeEmbeddingProvider(opts.model, opts.dims);
+  const provider = createNodeEmbeddingProvider(opts.model, opts.dims, { device: opts.device });
   process.stderr.write(`Warming up ${opts.model}...\n`);
   await provider.embedBatch(["warmup"]);
-
-  const rl = readline.createInterface({
-    input: fs.createReadStream(opts.input),
-    crlfDelay: Infinity,
-  });
 
   let skipped = 0;
   let processed = rowsWritten;
@@ -213,16 +211,15 @@ async function main(): Promise<void> {
   };
 
   try {
-    try {
-      for await (const line of rl) {
-        if (skipped < rowsWritten) {
-          skipped++;
-          continue;
-        }
-        batch.push(line);
-        if (batch.length >= opts.batchSize) {
-          await flushBatch();
-        }
+    for await (const line of readLinesAsync(opts.input)) {
+      if (skipped < rowsWritten) {
+        skipped++;
+        continue;
+      }
+      batch.push(line);
+      if (batch.length >= opts.batchSize) {
+        await flushBatch();
+      }
 
       if (Date.now() - lastLog > 2000) {
         lastLog = Date.now();
@@ -237,20 +234,12 @@ async function main(): Promise<void> {
         );
       }
 
-        if (processed - lastFlush >= opts.flushEvery) {
-          fs.fsyncSync(fd);
-          manifest.rowsWritten = processed;
-          manifest.updatedAt = new Date().toISOString();
-          saveManifest(opts.manifest, manifest);
-          lastFlush = processed;
-        }
-      }
-    } catch (err) {
-      // Node 24+ can throw ERR_USE_AFTER_CLOSE from the readline async iterator
-      // if the underlying stream closes while an await is pending inside the
-      // loop body. Treat as clean EOF; we flush whatever's left below.
-      if ((err as NodeJS.ErrnoException | undefined)?.code !== "ERR_USE_AFTER_CLOSE") {
-        throw err;
+      if (processed - lastFlush >= opts.flushEvery) {
+        fs.fsyncSync(fd);
+        manifest.rowsWritten = processed;
+        manifest.updatedAt = new Date().toISOString();
+        saveManifest(opts.manifest, manifest);
+        lastFlush = processed;
       }
     }
     await flushBatch();
