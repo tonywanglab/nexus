@@ -59,8 +59,16 @@ export function mergeByTarget(edges: CandidateEdge[]): CandidateEdge[] {
       existing.matchedBy = [...(existing.matchedBy ?? []), resolver];
       existing[SIMILARITY_FIELD[resolver]] = edge.similarity;
     }
-    if (edge.sparseFeatures && !existing.sparseFeatures) {
-      existing.sparseFeatures = edge.sparseFeatures;
+    // Prefer richer sparseFeatures: the sparse-feature resolver emits up to 4
+    // per side; the dense resolver emits just the top 1-2 shared explanations.
+    // When both fire for the same (phrase, target), keep whichever carries more.
+    if (edge.sparseFeatures) {
+      const incoming = edge.sparseFeatures.phraseFeatures.length
+        + edge.sparseFeatures.titleFeatures.length;
+      const current = existing.sparseFeatures
+        ? existing.sparseFeatures.phraseFeatures.length + existing.sparseFeatures.titleFeatures.length
+        : 0;
+      if (incoming > current) existing.sparseFeatures = edge.sparseFeatures;
     }
     existing.matchType = existing.matchedBy ? legacyMatchType(existing.matchedBy) : existing.matchType;
     existing.similarity = Math.max(
