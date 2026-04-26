@@ -171,14 +171,14 @@ function buildVaultContext(_files: VaultFile[], noteTitles: string[]): VaultCont
 
 // ── Evaluation engine ───────────────────────────────────────────
 
-function evaluateExtractor(
+async function evaluateExtractor(
   name: string,
-  extractFn: (content: string, vaultContext: VaultContext) => ExtractedPhrase[],
+  extractFn: (content: string, vaultContext: VaultContext) => Promise<ExtractedPhrase[]>,
   files: VaultFile[],
   noteTitles: string[],
   resolver: AliasResolver,
   vaultContext: VaultContext,
-): AggregateResult {
+): Promise<AggregateResult> {
   const normalizedTitles = new Set(noteTitles.map(normalize));
   const perFile: PerFileResult[] = [];
 
@@ -202,8 +202,8 @@ function evaluateExtractor(
 
     // 3. Strip wikilinks, run extractor + resolver
     const strippedContent = stripWikilinksForEval(file.content);
-    const phrases = extractFn(strippedContent, vaultContext);
-    const candidates = resolver.resolve(phrases, noteTitles, file.basename + ".md");
+    const phrases = await extractFn(strippedContent, vaultContext);
+    const candidates = await resolver.resolve(phrases, noteTitles, file.basename + ".md");
 
     // 4. Build predicted target set (normalized)
     const predicted = new Set<string>(
@@ -278,7 +278,7 @@ describe("Evaluation Framework", () => {
 
   const vaultExists = fs.existsSync(VAULT_DIR);
 
-  beforeAll(() => {
+  beforeAll(async () => {
     if (!vaultExists) return;
 
     // Load vault
@@ -290,7 +290,7 @@ describe("Evaluation Framework", () => {
 
     // Run SpanExtractor + Deterministic (LCS) resolver
     const spanExtractor = new SpanExtractor();
-    spanResult = evaluateExtractor(
+    spanResult = await evaluateExtractor(
       "SpanExtractor",
       (content, ctx) => spanExtractor.extract(content, ctx),
       files, noteTitles,
