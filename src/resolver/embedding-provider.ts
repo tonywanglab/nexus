@@ -123,42 +123,50 @@ function progressCallback(p) {
   }
 }
 
-function poolMeanNorm(embeddings) {
-  const dims = embeddings.dims;
+function maskVal(maskData, i) {
+  // Gemma tokenizer may return BigInt64Array; coerce to number before comparing.
+  const v = maskData[i];
+  return typeof v === "bigint" ? Number(v) : v;
+}
+
+function poolMeanNormBatched(embeddings, attentionMask) {
+  const dims = embeddings.dims;       // [batch, seqLen, hiddenDim]
+  const batch = dims[0];
   const seqLen = dims[1];
   const hiddenDim = dims[2];
-  const data = embeddings.data;
-  const pooled = new Float32Array(hiddenDim);
-  for (let s = 0; s < seqLen; s++) {
-    const row = s * hiddenDim;
-    for (let d = 0; d < hiddenDim; d++) {
-      pooled[d] += data[row + d];
+  const data = embeddings.data;       // Float32Array
+  const maskData = attentionMask.data;
+  const results = [];
+  for (let b = 0; b < batch; b++) {
+    const pooled = new Float32Array(hiddenDim);
+    let count = 0;
+    for (let s = 0; s < seqLen; s++) {
+      if (maskVal(maskData, b * seqLen + s) === 0) continue;
+      count++;
+      const offset = (b * seqLen + s) * hiddenDim;
+      for (let d = 0; d < hiddenDim; d++) pooled[d] += data[offset + d];
     }
+    for (let d = 0; d < hiddenDim; d++) pooled[d] /= count || 1;
+    let norm = 0;
+    for (let d = 0; d < hiddenDim; d++) norm += pooled[d] * pooled[d];
+    norm = Math.sqrt(norm);
+    if (norm > 0) for (let d = 0; d < hiddenDim; d++) pooled[d] /= norm;
+    results.push(Array.from(pooled));
   }
-  for (let d = 0; d < hiddenDim; d++) pooled[d] /= seqLen;
-  let norm = 0;
-  for (let d = 0; d < hiddenDim; d++) norm += pooled[d] * pooled[d];
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let d = 0; d < hiddenDim; d++) pooled[d] /= norm;
-  }
-  return pooled;
+  return results;
 }
 
 async function ensureModel() {
   if (mdl && tokenizer) return;
   if (!loadPromise) {
-    logToParent("loading EmbeddingGemma (first request may download a large model)…");
+    logToParent("loading EmbeddingGemma (first request may download model)…");
     const t0 = performance.now();
     loadPromise = (async () => {
       tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, {
         progress_callback: progressCallback,
       });
-      mdl = await AutoModel.from_pretrained(MODEL_ID, {
-        dtype: "q4",
-        progress_callback: progressCallback,
-      });
-      logToParent(\`model loaded in \${Math.round(performance.now() - t0)}ms\`);
+      mdl = await AutoModel.from_pretrained(MODEL_ID, { dtype: "q8", progress_callback: progressCallback });
+      logToParent(\`model loaded dtype=q8 in \${Math.round(performance.now() - t0)}ms\`);
     })();
   }
   await loadPromise;
@@ -171,13 +179,10 @@ window.addEventListener("message", async (event) => {
   try {
     if (method === "embed_batch") {
       await ensureModel();
-      const results = [];
-      for (const text of params.texts) {
-        const inputs = await tokenizer(text, { padding: true, truncation: true });
-        const output = await mdl(inputs);
-        const pooled = poolMeanNorm(output.last_hidden_state);
-        results.push(Array.from(pooled));
-      }
+      // Tokenize the whole batch at once and run a single forward pass.
+      const inputs = await tokenizer(params.texts, { padding: true, truncation: true });
+      const output = await mdl(inputs);
+      const results = poolMeanNormBatched(output.last_hidden_state, inputs.attention_mask);
       parent.postMessage({ id, result: results }, "*");
     } else if (method === "ping") {
       parent.postMessage({ id, result: "pong" }, "*");
@@ -374,8 +379,17 @@ export class TransformersIframeProvider implements EmbeddingProvider {
 
   async embedBatch(texts: string[], options?: EmbeddingRequestOptions): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-    const raw = await this.postMessage<number[][]>("embed_batch", { texts }, options?.priority);
-    return raw.map(arr => new Float32Array(arr));
+    // q8 Gemma-300M in WASM can't process arbitrary batch sizes within the 60s
+    // postMessage timeout — a reindex that passes 200+ note titles as one batch
+    // will hang the iframe. Chunk so each postMessage gets its own budget.
+    const CHUNK = 16;
+    const results: Float32Array[] = [];
+    for (let i = 0; i < texts.length; i += CHUNK) {
+      const chunk = texts.slice(i, i + CHUNK);
+      const raw = await this.postMessage<number[][]>("embed_batch", { texts: chunk }, options?.priority);
+      for (const arr of raw) results.push(new Float32Array(arr));
+    }
+    return results;
   }
 
   private emitProgressFromLog(msg: string): void {

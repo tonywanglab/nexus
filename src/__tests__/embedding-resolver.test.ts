@@ -4,7 +4,7 @@ import {
   normalizedBasename,
 } from "../resolver/normalization";
 import { EmbeddingProvider } from "../resolver/embedding-provider";
-import { EmbeddingResolver } from "../resolver/embedding-resolver";
+import { buildDenseExplanation, EmbeddingResolver } from "../resolver/embedding-resolver";
 import { SparseAutoencoder } from "../resolver/sae";
 import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { ExtractedPhrase } from "../types";
@@ -221,7 +221,7 @@ describe("EmbeddingResolver", () => {
     }
   });
 
-  it("deduplicates: same target from multiple phrases keeps best", async () => {
+  it("deduplicates: same (phrase, target) pair keeps best; distinct phrases to same target are kept", async () => {
     const phrases = [
       makePhrase("test phrase", 0.3),
       makePhrase("test phrase variant", 0.6),
@@ -229,8 +229,12 @@ describe("EmbeddingResolver", () => {
     const titles = ["test phrase"];
     const edges = await resolver.resolve(phrases, titles, "note.md");
 
+    // Each unique (phrase, target) pair appears at most once.
+    const seen = new Set(edges.map(e => `${e.phrase.phrase}|${e.targetPath}`));
+    expect(seen.size).toBe(edges.length);
+    // Both distinct phrases can produce an edge to the same target.
     const targetEdges = edges.filter(e => e.targetPath === "test phrase");
-    expect(targetEdges.length).toBeLessThanOrEqual(1);
+    expect(targetEdges.length).toBeGreaterThanOrEqual(1);
   });
 
   it("ranks by combined score (similarity × (1 - phraseScore))", async () => {
@@ -269,34 +273,26 @@ describe("EmbeddingResolver with SAE", () => {
   const provider = new MockEmbeddingProvider(8);
   const sae = SparseAutoencoder.randomInit(8, 32, 4, 99);
 
-  it("produces sparse embeddings alongside dense candidates", async () => {
+  it("dense edges carry SAE sparse-feature explanations when sae + featureLabels are attached", async () => {
+    const featureLabels = new SAEFeatureLabels(sae.dHidden);
     const resolver = new EmbeddingResolver({
       embeddingProvider: provider,
-      similarityThreshold: 0.5,
+      similarityThreshold: 0.0,
       sae,
+      featureLabels,
     });
 
     const phrases = [makePhrase("alpha", 0.3), makePhrase("beta", 0.3)];
     const titles = ["alpha", "gamma"];
-    const result = await resolver.resolveWithSparse(phrases, titles, "note.md");
+    const { candidates } = await resolver.resolveWithSparse(phrases, titles, "note.md");
 
-    expect(result.titleSparseEmbeddings).toBeDefined();
-    expect(result.phraseSparseEmbeddings).toBeDefined();
-    expect(result.titleSparseEmbeddings!.size).toBe(titles.length);
-    expect(result.phraseSparseEmbeddings!.length).toBe(phrases.length);
-
-    // Each sparse vector must have length dHidden and ≤ k non-zeros.
-    for (const vec of result.titleSparseEmbeddings!.values()) {
-      expect(vec.length).toBe(sae.dHidden);
-      let nonzero = 0;
-      for (let i = 0; i < vec.length; i++) if (vec[i] !== 0) nonzero++;
-      expect(nonzero).toBeLessThanOrEqual(sae.k);
-    }
-    for (const vec of result.phraseSparseEmbeddings!) {
-      expect(vec.length).toBe(sae.dHidden);
-      let nonzero = 0;
-      for (let i = 0; i < vec.length; i++) if (vec[i] !== 0) nonzero++;
-      expect(nonzero).toBeLessThanOrEqual(sae.k);
+    // At least one edge should carry a sparse-feature explanation.
+    const explained = candidates.filter((e) => e.sparseFeatures);
+    expect(explained.length).toBeGreaterThan(0);
+    for (const e of explained) {
+      const sf = e.sparseFeatures!;
+      expect(sf.phraseFeatures.length).toBeGreaterThan(0);
+      expect(sf.titleFeatures.length).toBe(sf.phraseFeatures.length);
     }
   });
 
@@ -324,7 +320,91 @@ describe("EmbeddingResolver with SAE", () => {
     }
   });
 
-  it("resolveWithSparse returns undefined sparse maps when no SAE", async () => {
+  it("enriches dense edges with top shared SAE features when featureLabels are attached", async () => {
+    const featureLabels = new SAEFeatureLabels(sae.dHidden);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      sae,
+      featureLabels,
+    });
+
+    const phrases = [makePhrase("alpha")];
+    const titles = ["beta"];
+    const edges = await resolver.resolve(phrases, titles, "note.md");
+    expect(edges.length).toBeGreaterThan(0);
+
+    // At least one edge should carry a sparse-feature explanation.
+    const explained = edges.filter((e) => e.sparseFeatures);
+    expect(explained.length).toBeGreaterThan(0);
+
+    for (const e of explained) {
+      const sf = e.sparseFeatures!;
+      // Default topN = 2.
+      expect(sf.phraseFeatures.length).toBeLessThanOrEqual(2);
+      expect(sf.titleFeatures.length).toBe(sf.phraseFeatures.length);
+      // The explanation is the intersection — each row's feature idx must match.
+      for (let i = 0; i < sf.phraseFeatures.length; i++) {
+        expect(sf.phraseFeatures[i].idx).toBe(sf.titleFeatures[i].idx);
+        expect(sf.phraseFeatures[i].label).toBe(sf.titleFeatures[i].label);
+        expect(sf.phraseFeatures[i].label.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("respects denseExplanationTopN option", async () => {
+    const featureLabels = new SAEFeatureLabels(sae.dHidden);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      sae,
+      featureLabels,
+      denseExplanationTopN: 1,
+    });
+
+    const edges = await resolver.resolve([makePhrase("alpha")], ["beta"], "note.md");
+    for (const e of edges) {
+      if (!e.sparseFeatures) continue;
+      expect(e.sparseFeatures.phraseFeatures.length).toBeLessThanOrEqual(1);
+      expect(e.sparseFeatures.titleFeatures.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("buildDenseExplanation ranks shared features by product of activations (not min)", () => {
+    // Craft two sparse encodings where one shared feature fires imbalanced
+    // (3.0 × 0.1 = 0.30) and another fires balanced-but-weak (0.5 × 0.5 = 0.25).
+    // Product ranks the imbalanced one first; min would have ranked the balanced
+    // one first. This test pins the product semantics.
+    const featureLabels = new SAEFeatureLabels(32);
+    const pEnc = {
+      indices: Int32Array.from([7, 11]),
+      values: Float32Array.from([3.0, 0.5]),
+    };
+    const tEnc = {
+      indices: Int32Array.from([7, 11]),
+      values: Float32Array.from([0.1, 0.5]),
+    };
+    const out = buildDenseExplanation(pEnc, tEnc, featureLabels, 2)!;
+    expect(out).toBeDefined();
+    // Product(7) = 0.30, Product(11) = 0.25 → feature 7 ranks first under product.
+    // Min(7) = 0.1, Min(11) = 0.5 → feature 11 would rank first under min.
+    expect(out.phraseFeatures[0].idx).toBe(7);
+    expect(out.phraseFeatures[1].idx).toBe(11);
+    expect(out.phraseFeatures[0].value).toBeCloseTo(3.0, 6);
+    expect(out.titleFeatures[0].value).toBeCloseTo(0.1, 6);
+  });
+
+  it("does not attach sparseFeatures when featureLabels are not provided", async () => {
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      sae,
+    });
+    const edges = await resolver.resolve([makePhrase("alpha")], ["beta"], "note.md");
+    for (const e of edges) expect(e.sparseFeatures).toBeUndefined();
+  });
+
+  it("resolveWithSparse returns candidates without crashing when no SAE", async () => {
     const resolver = new EmbeddingResolver({
       embeddingProvider: provider,
       similarityThreshold: 0.5,
@@ -334,8 +414,8 @@ describe("EmbeddingResolver with SAE", () => {
       ["alpha"],
       "note.md",
     );
-    expect(result.titleSparseEmbeddings).toBeUndefined();
-    expect(result.phraseSparseEmbeddings).toBeUndefined();
+    expect(result.candidates).toBeDefined();
+    expect(Array.isArray(result.candidates)).toBe(true);
   });
 });
 
@@ -428,5 +508,301 @@ describe("EmbeddingResolver.resolveBySparseFeatures", () => {
       { similarityThreshold: 0 },
     );
     expect(edges.every(e => e.targetPath !== "My Note")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Counting mock provider — lets us assert provider.embedBatch is actually
+// called vs. served from cache. Separate from MockEmbeddingProvider to avoid
+// perturbing existing tests.
+// ---------------------------------------------------------------------------
+class CountingMockProvider implements EmbeddingProvider {
+  readonly dims: number;
+  public calls = 0;
+  public embeddedTexts: string[][] = [];
+
+  constructor(dims: number = 8) {
+    this.dims = dims;
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    return (await this.embedBatch([text]))[0];
+  }
+
+  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    this.calls++;
+    this.embeddedTexts.push([...texts]);
+    return texts.map((t) => this.deterministicVector(t));
+  }
+
+  async dispose(): Promise<void> {}
+
+  private deterministicVector(text: string): Float32Array {
+    const v = new Float32Array(this.dims);
+    for (let i = 0; i < text.length; i++) v[i % this.dims] += text.charCodeAt(i);
+    let n = 0;
+    for (let i = 0; i < this.dims; i++) n += v[i] * v[i];
+    n = Math.sqrt(n);
+    if (n > 0) for (let i = 0; i < this.dims; i++) v[i] /= n;
+    return v;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vault-wide phrase embedding cache
+// ---------------------------------------------------------------------------
+describe("EmbeddingResolver phrase cache", () => {
+  it("does not re-embed the same phrase across resolve calls", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+    });
+
+    await resolver.resolve(
+      [makePhrase("machine learning"), makePhrase("neural networks")],
+      ["ml", "dl"],
+      "a.md",
+    );
+    const callsAfterFirst = provider.calls;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    // Second call with the same phrases — provider should only be invoked
+    // for title work, not phrase embedding (titles are also cached, so ideally
+    // zero extra calls when the title set doesn't change).
+    provider.calls = 0;
+    provider.embeddedTexts = [];
+    await resolver.resolve(
+      [makePhrase("machine learning"), makePhrase("neural networks")],
+      ["ml", "dl"],
+      "b.md",
+    );
+    // No embedding should have been invoked — both phrases and titles are cached.
+    expect(provider.calls).toBe(0);
+  });
+
+  it("only embeds the novel subset when the phrase set overlaps a prior call", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+    });
+
+    await resolver.resolve(
+      [makePhrase("alpha"), makePhrase("beta")],
+      ["x"],
+      "a.md",
+    );
+    provider.calls = 0;
+    provider.embeddedTexts = [];
+    await resolver.resolve(
+      [makePhrase("alpha"), makePhrase("gamma")], // alpha cached, gamma new
+      ["x"],
+      "b.md",
+    );
+    // Only "gamma" should hit the provider for phrase embedding.
+    const allEmbedded = provider.embeddedTexts.flat();
+    expect(allEmbedded).toContain("gamma");
+    expect(allEmbedded).not.toContain("alpha");
+  });
+
+  it("evicts FIFO when phrase cache exceeds the limit", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      phraseCacheLimit: 3,
+    });
+
+    // Fill: "a", "b", "c"
+    await resolver.resolve(
+      [makePhrase("a"), makePhrase("b"), makePhrase("c")],
+      ["x"],
+      "first.md",
+    );
+    // Add "d" → evicts "a".
+    await resolver.resolve([makePhrase("d")], ["x"], "second.md");
+
+    // Now asking for "a" again should re-embed it.
+    provider.calls = 0;
+    provider.embeddedTexts = [];
+    await resolver.resolve([makePhrase("a"), makePhrase("d")], ["x"], "third.md");
+
+    const embedded = provider.embeddedTexts.flat();
+    expect(embedded).toContain("a"); // was evicted, re-embedded
+    expect(embedded).not.toContain("d"); // still cached
+  });
+
+  it("FIFO eviction during a call cannot drop entries still needed by that call", async () => {
+    // Regression: the eviction loop used to run before the snapshot map,
+    // so when a call added N new phrases that pushed the cache over cap,
+    // it could evict previously-cached phrases that were also in the
+    // current request — causing .get(t) to return undefined and the SAE
+    // encodeSparse call to blow up on an undefined embedding.
+    const provider = new CountingMockProvider(8);
+    const sae = SparseAutoencoder.randomInit(8, 32, 4, 42);
+    const featureLabels = new SAEFeatureLabels(32);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      phraseCacheLimit: 3,
+      sae,
+      featureLabels,
+    });
+
+    // Prime the cache with "a" (now the oldest entry).
+    await resolver.resolve([makePhrase("a")], ["x"], "first.md");
+
+    // Second call asks for "a" + 3 new phrases. New entries push the cache
+    // size from 1 to 4; limit is 3, so one entry is evicted. The snapshot
+    // must capture "a"'s embedding before the eviction runs — otherwise
+    // phraseEmbeddings[0] is undefined and encodeSparse blows up.
+    // If eviction is buggy this throws; otherwise it must return 4 candidates.
+    const { candidates } = await resolver.resolveWithSparse(
+      [makePhrase("a"), makePhrase("b"), makePhrase("c"), makePhrase("d")],
+      ["x"],
+      "second.md",
+    );
+    expect(Array.isArray(candidates)).toBe(true);
+  });
+
+  it("shares phrase cache between resolve and resolveBySparseFeatures", async () => {
+    const provider = new CountingMockProvider(8);
+    const sae = SparseAutoencoder.randomInit(8, 32, 4, 42);
+    const featureLabels = new SAEFeatureLabels(32);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      sae,
+    });
+
+    const phrases = [makePhrase("p1"), makePhrase("p2")];
+    await resolver.resolve(phrases, ["t1"], "a.md");
+    provider.calls = 0;
+    provider.embeddedTexts = [];
+
+    await resolver.resolveBySparseFeatures(phrases, ["t1"], "a.md", featureLabels, {
+      similarityThreshold: 0,
+    });
+    // All phrase texts and the title are cached — no embed calls needed.
+    expect(provider.calls).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Title embedding cache: seed, export, prune, change notifications
+// ---------------------------------------------------------------------------
+describe("EmbeddingResolver title cache", () => {
+  it("seedTitleEmbeddings suppresses future embedBatch calls for those titles", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+    });
+
+    const seeded = new Map<string, Float32Array>();
+    seeded.set("t1", new Float32Array([1, 0, 0, 0, 0, 0, 0, 0]));
+    seeded.set("t2", new Float32Array([0, 1, 0, 0, 0, 0, 0, 0]));
+    resolver.seedTitleEmbeddings(seeded);
+
+    await resolver.resolve([makePhrase("phrase")], ["t1", "t2"], "a.md");
+    // Only the phrase should have been embedded; titles served from seed.
+    const embedded = provider.embeddedTexts.flat();
+    expect(embedded).toContain("phrase");
+    expect(embedded).not.toContain("t1");
+    expect(embedded).not.toContain("t2");
+  });
+
+  it("exportTitleEmbeddings snapshots the current cache and is isolated from further writes", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+    });
+    await resolver.resolve([makePhrase("p")], ["t1"], "a.md");
+    const snap = resolver.exportTitleEmbeddings();
+    expect(snap.has("t1")).toBe(true);
+    const originalSize = snap.size;
+
+    await resolver.resolve([makePhrase("p")], ["t1", "t2"], "b.md");
+    // Old snapshot is unaffected by later resolve() calls.
+    expect(snap.size).toBe(originalSize);
+    expect(snap.has("t2")).toBe(false);
+    // But the resolver itself has t2 cached now.
+    expect(resolver.exportTitleEmbeddings().has("t2")).toBe(true);
+  });
+
+  it("onTitleEmbeddingsChanged fires only when new titles are added", async () => {
+    const provider = new CountingMockProvider(8);
+    const changes: number[] = [];
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      onTitleEmbeddingsChanged: (m) => changes.push(m.size),
+    });
+
+    await resolver.resolve([makePhrase("p")], ["t1", "t2"], "a.md");
+    expect(changes.length).toBe(1);
+    expect(changes[0]).toBe(2);
+
+    // Same titles again → no change event.
+    await resolver.resolve([makePhrase("p")], ["t1", "t2"], "b.md");
+    expect(changes.length).toBe(1);
+
+    // One new title → one more event.
+    await resolver.resolve([makePhrase("p")], ["t1", "t2", "t3"], "c.md");
+    expect(changes.length).toBe(2);
+    expect(changes[1]).toBe(3);
+  });
+
+  it("pruneTitleCacheTo removes stale titles and fires a change event", async () => {
+    const provider = new CountingMockProvider(8);
+    let lastSize = 0;
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      onTitleEmbeddingsChanged: (m) => { lastSize = m.size; },
+    });
+    await resolver.resolve([makePhrase("p")], ["a", "b", "c"], "x.md");
+    expect(lastSize).toBe(3);
+
+    const removed = resolver.pruneTitleCacheTo(new Set(["a"]));
+    expect(removed).toBe(2);
+    expect(lastSize).toBe(1);
+    expect([...resolver.exportTitleEmbeddings().keys()]).toEqual(["a"]);
+  });
+
+  it("pruneTitleCacheTo is a no-op when nothing is stale", async () => {
+    const provider = new CountingMockProvider(8);
+    let events = 0;
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+      onTitleEmbeddingsChanged: () => events++,
+    });
+    await resolver.resolve([makePhrase("p")], ["a", "b"], "x.md");
+    const before = events;
+    const removed = resolver.pruneTitleCacheTo(new Set(["a", "b"]));
+    expect(removed).toBe(0);
+    expect(events).toBe(before); // no extra event
+  });
+
+  it("retains cached titles across calls whose title set differs (no churn)", async () => {
+    const provider = new CountingMockProvider(8);
+    const resolver = new EmbeddingResolver({
+      embeddingProvider: provider,
+      similarityThreshold: 0.0,
+    });
+    await resolver.resolve([makePhrase("p")], ["a", "b"], "1.md");
+    // Second call omits "b" — but "b" should still be in the cache, not pruned.
+    await resolver.resolve([makePhrase("p")], ["a"], "2.md");
+    expect(resolver.exportTitleEmbeddings().has("b")).toBe(true);
+
+    // Third call reintroduces "b" with the same title set — provider must not
+    // be invoked to re-embed it.
+    provider.calls = 0;
+    provider.embeddedTexts = [];
+    await resolver.resolve([makePhrase("p")], ["a", "b"], "3.md");
+    expect(provider.embeddedTexts.flat()).not.toContain("b");
   });
 });
