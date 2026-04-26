@@ -2,6 +2,7 @@ import { ExtractedPhrase, VaultContext } from "../types";
 import { preprocess } from "./preprocessing";
 import { STOPWORDS } from "./stopwords";
 import { normalizeScores } from "./scoring";
+import { makeYielder } from "../resolver/shared-utils";
 
 /**
  * Configuration for the span-based keyphrase extractor.
@@ -33,7 +34,7 @@ export class SpanExtractor {
     this.opts = { ...DEFAULTS, ...options };
   }
 
-  extract(content: string, vaultContext?: VaultContext): ExtractedPhrase[] {
+  async extract(content: string, vaultContext?: VaultContext): Promise<ExtractedPhrase[]> {
     if (!content || !content.trim()) return [];
 
     const { sentences, stripped, offsetMap } = preprocess(content);
@@ -42,8 +43,11 @@ export class SpanExtractor {
     // Case-insensitive dedup map: lowered phrase → ExtractedPhrase (first occurrence wins)
     const seen = new Map<string, ExtractedPhrase>();
 
-    // ── 1. Generate all contiguous token windows per sentence ──
+    // ── 1. Generate all contiguous token windows per sentence.
+    // Time-budget yielder keeps the UI responsive on large documents. ──
+    const yieldIfNeeded = makeYielder();
     for (const sentence of sentences) {
+      await yieldIfNeeded();
       const tokens = sentence.tokens;
 
       for (let n = 1; n <= Math.min(this.opts.maxNgramSize, tokens.length); n++) {
@@ -78,7 +82,7 @@ export class SpanExtractor {
 
     // ── 2. Vault-title scan ──
     if (vaultContext?.noteTitles) {
-      for (const result of this.scanVaultTitles(stripped, offsetMap, vaultContext)) {
+      for (const result of await this.scanVaultTitles(stripped, offsetMap, vaultContext)) {
         const key = result.phrase.toLowerCase();
         if (!seen.has(key)) {
           seen.set(key, result);
@@ -95,19 +99,23 @@ export class SpanExtractor {
   /**
    * Scans stripped text for verbatim occurrences of vault note titles.
    * Returns one ExtractedPhrase per matched title (first occurrence only),
-   * with score=0 so they rank highly in topN selection.
+   * with score=0 so they rank highly in topN selection. Time-budget yielder
+   * keeps the UI responsive for large vaults (each title is a fresh regex
+   * compile + exec — hundreds of titles can otherwise pin the main thread).
    */
-  private scanVaultTitles(
+  private async scanVaultTitles(
     stripped: string,
     offsetMap: number[],
     vaultContext: VaultContext,
-  ): ExtractedPhrase[] {
+  ): Promise<ExtractedPhrase[]> {
     const { noteTitles } = vaultContext;
     if (!noteTitles || noteTitles.length === 0) return [];
 
     const results: ExtractedPhrase[] = [];
+    const yieldIfNeeded = makeYielder();
 
     for (const title of noteTitles) {
+      await yieldIfNeeded();
       if (!title || title.length < 2) continue;
 
       const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

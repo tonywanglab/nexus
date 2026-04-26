@@ -16,6 +16,17 @@ import { mergeByTarget } from "./resolver/merge-by-target";
 import { NexusApprovalView, APPROVAL_VIEW_TYPE } from "./ui/approval-view";
 import { NexusSettingsModal } from "./ui/settings-modal";
 import { ProgressToast } from "./ui/progress-toast";
+import { serializeEmbeddings, deserializeEmbeddings } from "./embedding-persistence";
+
+/**
+ * Phrases whose LCS match against some title is this strong or higher can skip
+ * dense/sparse embedding — the lexical match alone is decisive enough that the
+ * extra compute rarely surfaces new targets worth showing.
+ */
+const STRONG_LCS_MATCH = 0.95;
+const MAX_EMBED_PHRASES = 60;
+const TITLE_EMBEDDINGS_FILENAME = "title-embeddings.bin";
+const TITLE_EMBEDDINGS_SAVE_DEBOUNCE_MS = 3000;
 
 export default class NexusPlugin extends Plugin {
   private eventListener!: EventListener;
@@ -28,6 +39,8 @@ export default class NexusPlugin extends Plugin {
   private noteRegistry!: NoteRegistry;
   private edgeStore!: EdgeStore;
   private indexingProgress: { toast: ProgressToast; pending: Set<string> } | null = null;
+  private titleEmbeddingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private titleEmbeddingsDim: number | null = null;
 
   async onload() {
     console.log("Nexus: loading plugin");
@@ -49,17 +62,32 @@ export default class NexusPlugin extends Plugin {
     this.resolver = new AliasResolver();
     this.embeddingProvider = new TransformersIframeProvider();
     this.wireModelDownloadNotice();
+    // Fire-and-forget warmup so the model starts downloading immediately rather
+    // than on the first user-triggered embedding request.
+    void this.embeddingProvider.embed("warmup").catch((err) => {
+      console.warn("Nexus: embedding warmup failed", err);
+    });
     const sae = loadBundledSAE();
-    this.featureLabels = new SAEFeatureLabels();
+    this.featureLabels = new SAEFeatureLabels(sae.dHidden);
     console.log(
       `Nexus: loaded SAE (d_model=${sae.dModel}, d_hidden=${sae.dHidden}, k=${sae.k}), feature labels: ${this.featureLabels.liveCount}/${sae.dHidden} live`,
     );
     this.embeddingResolver = new EmbeddingResolver({
       embeddingProvider: this.embeddingProvider,
       sae,
+      featureLabels: this.featureLabels,
+      onTitleEmbeddingsChanged: () => this.scheduleTitleEmbeddingsSave(),
     });
+    // Load persisted title embeddings; if none exist yet, first indexing pass
+    // will populate them. Failures are non-fatal (we'll just re-embed).
+    await this.loadTitleEmbeddings();
 
     this.jobQueue = new JobQueue(async (job) => {
+      // Yield once before starting heavy work — the debounce timer fires
+      // synchronously, so without this the full pipeline runs in the same
+      // macrotask and delays the next paint the editor queued for a keystroke.
+      await new Promise<void>((r) => setTimeout(r));
+
       const file = this.app.vault.getAbstractFileByPath(job.filePath);
       if (!(file instanceof TFile)) return;
 
@@ -82,7 +110,7 @@ export default class NexusPlugin extends Plugin {
         if (id) basenameToId.set(f.basename, id);
       }
       const vaultContext: VaultContext = { noteTitles };
-      const phrases = this.extractor.extract(content, vaultContext);
+      const phrases = await this.extractor.extract(content, vaultContext);
       console.log(`Nexus:   extracted ${phrases.length} phrase(s)`);
 
       if (phrases.length === 0) {
@@ -92,7 +120,7 @@ export default class NexusPlugin extends Plugin {
         return;
       }
 
-      const detEdges = this.resolver.resolve(phrases, noteTitles, job.filePath);
+      const detEdges = await this.resolver.resolve(phrases, noteTitles, job.filePath);
       console.log(`Nexus:   ${detEdges.length} deterministic edge(s)`);
 
       // Annotate with ids
@@ -113,14 +141,40 @@ export default class NexusPlugin extends Plugin {
         this.edgeStore.setInterimEdgesForFile(sourceId, detMerged);
       }
 
+      // Skip embedding for phrases that already have a near-perfect LCS match —
+      // dense/sparse rarely surface anything new for those, and embedding cost
+      // dominates the pipeline. Phrases with no LCS match or only weak matches
+      // still go through so dense can find semantically related targets.
+      const stronglyMatched = new Set<string>();
+      for (const e of detEdges) {
+        if (e.similarity >= STRONG_LCS_MATCH) stronglyMatched.add(e.phrase.phrase);
+      }
+      const phrasesFiltered = stronglyMatched.size === 0
+        ? phrases
+        : phrases.filter((p) => !stronglyMatched.has(p.phrase));
+      if (stronglyMatched.size > 0) {
+        console.log(
+          `Nexus:   skipping embedding for ${stronglyMatched.size} phrase(s) with strong LCS match (>=${STRONG_LCS_MATCH})`,
+        );
+      }
+      const cap = MAX_EMBED_PHRASES;
+      const phrasesForEmbedding = phrasesFiltered.length > cap
+        ? phrasesFiltered.slice().sort((a, b) => a.phrase.length - b.phrase.length).slice(0, cap)
+        : phrasesFiltered;
+      if (phrasesFiltered.length > cap) {
+        console.log(`Nexus:   capped embedding phrases ${phrasesFiltered.length} → ${cap}`);
+      }
+
       try {
         const embT0 = performance.now();
-        const embEdges = await this.embeddingResolver.resolve(
-          phrases,
-          noteTitles,
-          job.filePath,
-          job.priority,
-        );
+        const embEdges = phrasesForEmbedding.length === 0
+          ? []
+          : await this.embeddingResolver.resolve(
+              phrasesForEmbedding,
+              noteTitles,
+              job.filePath,
+              job.priority,
+            );
         console.log(
           `Nexus:   ${embEdges.length} embedding edge(s) (${Math.round(performance.now() - embT0)}ms)`,
         );
@@ -130,16 +184,26 @@ export default class NexusPlugin extends Plugin {
           targetId: basenameToId.get(e.targetPath),
         }));
 
+        // Persist det+dense now so the UI reflects dense edges even if sparse is
+        // still running or gets interrupted. mtime is not bumped — sparse will do
+        // the final write with mtime, keeping the file eligible for retry if killed.
+        this.edgeStore.setInterimEdgesForFile(
+          sourceId,
+          mergeByTarget([...annotated, ...annotatedEmb]),
+        );
+
         let annotatedSparse: typeof annotatedEmb = [];
         try {
           const sparseT0 = performance.now();
-          const sparseEdges = await this.embeddingResolver.resolveBySparseFeatures(
-            phrases,
-            noteTitles,
-            job.filePath,
-            this.featureLabels,
-            { similarityThreshold: 0.75, priority: job.priority },
-          );
+          const sparseEdges = phrasesForEmbedding.length === 0
+            ? []
+            : await this.embeddingResolver.resolveBySparseFeatures(
+                phrasesForEmbedding,
+                noteTitles,
+                job.filePath,
+                this.featureLabels,
+                { similarityThreshold: 0.75, priority: job.priority },
+              );
           console.log(
             `Nexus:   ${sparseEdges.length} sparse feature edge(s) (${Math.round(performance.now() - sparseT0)}ms)`,
           );
@@ -197,6 +261,9 @@ export default class NexusPlugin extends Plugin {
         const file = view?.file;
         const path = file?.path ?? null;
         this.jobQueue.setActiveFile(path);
+        // Drop background normal-priority pending jobs so the active file's job
+        // cuts ahead rather than waiting behind stale background work.
+        if (path) this.jobQueue.cancelNormalExcept(path);
         if (path && typeof path === "string" && path.endsWith(".md")) {
           const id = this.noteRegistry.getId(path);
           const cachedMtime = id ? this.edgeStore.getMtime(id) : null;
@@ -258,6 +325,16 @@ export default class NexusPlugin extends Plugin {
         if (repaired > 0) console.log(`Nexus: repaired ids on ${repaired} legacy edge(s)`);
       }
 
+      // Drop persisted title embeddings for titles that no longer exist
+      // (renames, deletions). Triggers a debounced save if anything changed.
+      {
+        const activeTitles = new Set(
+          (this.app.vault.getMarkdownFiles() as TFile[]).map((f) => f.basename),
+        );
+        const removed = this.embeddingResolver.pruneTitleCacheTo(activeTitles);
+        if (removed > 0) console.log(`Nexus: pruned ${removed} stale title embedding(s)`);
+      }
+
       const { enqueuedPaths } = await initializeFromCache(
         this.app.vault,
         this.noteRegistry,
@@ -283,6 +360,49 @@ export default class NexusPlugin extends Plugin {
     if (!this.indexingProgress.pending.delete(path)) return;
     this.indexingProgress.toast.tick();
     if (this.indexingProgress.pending.size === 0) this.indexingProgress = null;
+  }
+
+  private titleEmbeddingsFilePath(): string {
+    return `${this.manifest.dir}/${TITLE_EMBEDDINGS_FILENAME}`;
+  }
+
+  private async loadTitleEmbeddings(): Promise<void> {
+    const path = this.titleEmbeddingsFilePath();
+    try {
+      const adapter = this.app.vault.adapter;
+      if (!(await adapter.exists(path))) return;
+      const buf = await adapter.readBinary(path);
+      const { dim, map } = deserializeEmbeddings(buf);
+      this.titleEmbeddingsDim = dim;
+      this.embeddingResolver.seedTitleEmbeddings(map);
+      console.log(`Nexus: loaded ${map.size} persisted title embedding(s) dim=${dim}`);
+    } catch (err) {
+      console.warn("Nexus: failed to load title embeddings, continuing without cache:", err);
+    }
+  }
+
+  private scheduleTitleEmbeddingsSave(): void {
+    if (this.titleEmbeddingsSaveTimer !== null) clearTimeout(this.titleEmbeddingsSaveTimer);
+    this.titleEmbeddingsSaveTimer = setTimeout(() => {
+      this.titleEmbeddingsSaveTimer = null;
+      void this.flushTitleEmbeddings();
+    }, TITLE_EMBEDDINGS_SAVE_DEBOUNCE_MS);
+  }
+
+  private async flushTitleEmbeddings(): Promise<void> {
+    const map = this.embeddingResolver.exportTitleEmbeddings();
+    if (map.size === 0) return;
+    try {
+      const dim = this.titleEmbeddingsDim
+        ?? (map.values().next().value as Float32Array | undefined)?.length
+        ?? 0;
+      if (dim === 0) return;
+      this.titleEmbeddingsDim = dim;
+      const buf = serializeEmbeddings(map, dim);
+      await this.app.vault.adapter.writeBinary(this.titleEmbeddingsFilePath(), buf);
+    } catch (err) {
+      console.warn("Nexus: failed to persist title embeddings:", err);
+    }
   }
 
   private wireModelDownloadNotice(): void {
@@ -320,6 +440,11 @@ export default class NexusPlugin extends Plugin {
   async onunload() {
     this.eventListener.unsubscribe();
     this.jobQueue.clear();
+    if (this.titleEmbeddingsSaveTimer !== null) {
+      clearTimeout(this.titleEmbeddingsSaveTimer);
+      this.titleEmbeddingsSaveTimer = null;
+    }
+    await this.flushTitleEmbeddings();
     await this.edgeStore.shutdown();
     await this.embeddingProvider.dispose();
     console.log("Nexus: unloaded");

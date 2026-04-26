@@ -1,0 +1,224 @@
+/* ── Empty state ── */
+.nexus-empty {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  text-align: center;
+  padding: 40px 16px;
+}
+
+/* ── Toolbar ── */
+.nexus-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 10px 0 8px;
+  margin-bottom: 2px;
+}
+
+/* ── Tabs ── */
+.nexus-tabs {
+  display: flex;
+  gap: 2px;
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nexus-tab {
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  cursor: pointer;
+}
+
+.nexus-tab:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.nexus-tab-active {
+  color: var(--text-normal);
+  font-weight: 600;
+  background: var(--background-modifier-active-hover);
+  border-bottom: 2px solid var(--interactive-accent);
+}
+
+/* ── Card list ── */
+.nexus-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 20px;
+}
+
+/* ── Card ── */
+.nexus-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Card header ── */
+.nexus-card-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px;
+  line-height: 1.4;
+}
+
+.nexus-phrase {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text-normal);
+}
+
+.nexus-arrow {
+  color: var(--text-faint);
+  font-size: 0.85em;
+  padding: 0 1px;
+}
+
+.nexus-target {
+  font-size: 0.9em;
+  color: var(--text-accent);
+}
+
+/* ── Card meta row ── */
+.nexus-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Resolver badges ── */
+.nexus-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.nexus-badge-lcs {
+  background: color-mix(in srgb, var(--color-blue) 15%, transparent);
+  color: var(--color-blue);
+}
+
+.nexus-badge-dense {
+  background: color-mix(in srgb, var(--color-purple) 15%, transparent);
+  color: var(--color-purple);
+}
+
+.nexus-badge-sparse {
+  background: color-mix(in srgb, var(--color-orange) 15%, transparent);
+  color: var(--color-orange);
+}
+
+.nexus-badge-lcs-dense,
+.nexus-badge-lcs-sparse,
+.nexus-badge-dense-sparse,
+.nexus-badge-lcs-dense-sparse {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  color: var(--interactive-accent);
+}
+
+/* ── Similarity score ── */
+.nexus-similarity {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.nexus-score-detail {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Sparse feature block ── */
+.nexus-sparse-features {
+  padding: 6px 8px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.nexus-sparse-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.nexus-sparse-chip {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.nexus-sparse-chip-match {
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+/* ── Card actions ── */
+.nexus-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ── Buttons ── */
+.nexus-btn {
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.nexus-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.nexus-approve {
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
+  color: var(--color-green);
+  border-color: color-mix(in srgb, var(--color-green) 30%, transparent);
+}
+
+.nexus-approve:hover {
+  background: color-mix(in srgb, var(--color-green) 22%, transparent);
+}
+
+.nexus-deny {
+  background: color-mix(in srgb, var(--color-red) 10%, transparent);
+  color: var(--color-red);
+  border-color: color-mix(in srgb, var(--color-red) 25%, transparent);
+}
+
+.nexus-deny:hover {
+  background: color-mix(in srgb, var(--color-red) 20%, transparent);
+}
+
+.nexus-reindex {
+  font-size: 11px;
+  padding: 3px 10px;
+  color: var(--text-muted);
+}
+
