@@ -4,6 +4,8 @@ import { EdgeStore } from "../edge-store";
 
 export const APPROVAL_VIEW_TYPE = "nexus-approval";
 
+/** Max cards rendered per tab — keeps the panel snappy when a note has many matches. */
+
 export interface CardVM {
   edge: CandidateEdge;
   phraseText: string;
@@ -92,6 +94,7 @@ export class NexusApprovalView extends ItemView {
   private activeFilePath: string | null = null;
   private pendingApprovals = new Map<string, Promise<void>>();
   private activeTab: EdgeTab = "lcs";
+  private renderRaf: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, store: EdgeStore, plugin: any) {
     super(leaf);
@@ -112,12 +115,25 @@ export class NexusApprovalView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    this.unsub = this.store.subscribe(() => this.render());
+    this.unsub = this.store.subscribe(() => {
+      // Debounce via rAF: batch rapid store writes (e.g. bulk indexing) into a
+      // single render, keeping the UI responsive during background processing.
+      if (this.renderRaf !== null) cancelAnimationFrame(this.renderRaf);
+      this.renderRaf = requestAnimationFrame(() => {
+        this.renderRaf = null;
+        this.render();
+      });
+    });
 
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         const active = this.app.workspace.getActiveFile();
         this.activeFilePath = active?.path ?? null;
+        // Cancel any pending rAF so we render immediately for the new active file.
+        if (this.renderRaf !== null) {
+          cancelAnimationFrame(this.renderRaf);
+          this.renderRaf = null;
+        }
         this.render();
       }),
     );
@@ -130,6 +146,10 @@ export class NexusApprovalView extends ItemView {
   async onClose(): Promise<void> {
     this.unsub?.();
     this.unsub = null;
+    if (this.renderRaf !== null) {
+      cancelAnimationFrame(this.renderRaf);
+      this.renderRaf = null;
+    }
   }
 
   private render(): void {
@@ -142,7 +162,13 @@ export class NexusApprovalView extends ItemView {
       : null;
 
     if (!activeId) {
-      el.createEl("p", { text: "Open a note to see candidate links.", cls: "nexus-empty" });
+      const isMarkdown = this.activeFilePath?.endsWith(".md") ?? false;
+      el.createEl("p", {
+        text: isMarkdown
+          ? "Indexing this note…"
+          : "Open a note to see candidate links.",
+        cls: "nexus-empty",
+      });
       return;
     }
 
@@ -179,19 +205,12 @@ export class NexusApprovalView extends ItemView {
 
   private renderTabs(container: any, lcsCount: number, denseCount: number, sparseCount: number): void {
     const tabs = container.createEl("div", { cls: "nexus-tabs" });
-    tabs.style.display = "flex";
-    tabs.style.gap = "4px";
-    tabs.style.marginBottom = "8px";
     const mk = (tab: EdgeTab, label: string, count: number) => {
       const active = this.activeTab === tab;
       const btn = tabs.createEl("button", {
         text: `${label} (${count})`,
         cls: `nexus-tab${active ? " nexus-tab-active" : ""}`,
       });
-      if (active) {
-        btn.style.fontWeight = "600";
-        btn.style.borderBottom = "2px solid var(--interactive-accent)";
-      }
       btn.addEventListener("click", () => {
         if (this.activeTab === tab) return;
         this.activeTab = tab;
@@ -252,28 +271,28 @@ export class NexusApprovalView extends ItemView {
     card: any,
     sparseFeatures: NonNullable<CandidateEdge["sparseFeatures"]>,
   ): void {
-    const phraseIdxSet = new Set(sparseFeatures.phraseFeatures.map((f) => f.idx));
-    const titleIdxSet = new Set(sparseFeatures.titleFeatures.map((f) => f.idx));
-    const matchingIdxSet = new Set([...phraseIdxSet].filter((i) => titleIdxSet.has(i)));
+    // Collapse the phrase/title payloads into the features that fire on both
+    // sides — the interpretable "why these two match" signal. Rank by pVal*tVal
+    // (the feature's literal contribution to sparseCosine), and cap at 2 chips.
+    const phraseByIdx = new Map<number, { value: number; label: string }>();
+    for (const f of sparseFeatures.phraseFeatures) {
+      phraseByIdx.set(f.idx, { value: f.value, label: f.label });
+    }
+    const shared: { idx: number; label: string; score: number }[] = [];
+    for (const tf of sparseFeatures.titleFeatures) {
+      const pf = phraseByIdx.get(tf.idx);
+      if (!pf) continue;
+      shared.push({ idx: tf.idx, label: pf.label, score: pf.value * tf.value });
+    }
+    if (shared.length === 0) return;
+    shared.sort((a, b) => b.score - a.score);
+    const top = shared.slice(0, 2);
 
     const el = card.createEl("div", { cls: "nexus-sparse-features" });
-
-    const renderRow = (label: string, features: typeof sparseFeatures.phraseFeatures) => {
-      const row = el.createEl("div", { cls: "nexus-sparse-row" });
-      row.createEl("span", { text: label, cls: "nexus-sparse-row-label" });
-      const chips = row.createEl("span", { cls: "nexus-sparse-chips" });
-      for (const feat of features) {
-        const isMatch = matchingIdxSet.has(feat.idx);
-        const chip = chips.createEl("span", {
-          text: feat.label,
-          cls: `nexus-sparse-chip${isMatch ? " nexus-sparse-chip-match" : ""}`,
-        });
-        if (isMatch) chip.style.fontWeight = "700";
-      }
-    };
-
-    renderRow("phrase:", sparseFeatures.phraseFeatures);
-    renderRow("title:", sparseFeatures.titleFeatures);
+    const chips = el.createEl("div", { cls: "nexus-sparse-chips" });
+    for (const f of top) {
+      chips.createEl("span", { text: f.label, cls: "nexus-sparse-chip nexus-sparse-chip-match" });
+    }
   }
 
   private handleApprove(vm: CardVM): void {
