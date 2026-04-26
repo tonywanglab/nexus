@@ -13,6 +13,9 @@
  *
  * Extractor values: span, yake, all (default: all)
  * Resolver values:  lcs, arctic, gemma, sparse, all (default: all)
+ *
+ * Gemma ONNX device (default: coreml on macOS, cpu elsewhere; same as embed scripts):
+ *   npm run eval -- --resolver=gemma --device=cpu
  */
 
 import * as fs from "fs";
@@ -22,12 +25,12 @@ import { YakeLite } from "../src/keyphrase/yake-lite";
 import { AliasResolver } from "../src/resolver/index";
 import { EmbeddingResolver } from "../src/resolver/embedding-resolver";
 import { EmbeddingProvider } from "../src/resolver/embedding-provider";
-import { meanPoolNormalizeL2FromLastHidden } from "../src/resolver/gemma-embedding";
 import { SparseAutoencoder } from "../src/resolver/sae";
 import { SAEFeatureLabels } from "../src/resolver/sae-feature-labels";
 import { cosineSimilarity } from "../src/resolver/cosine";
 import { normalize } from "../src/resolver/normalization";
 import { ExtractedPhrase, CandidateEdge, VaultContext } from "../src/types";
+import { createNodeEmbeddingProvider } from "./lib/node-providers";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -200,8 +203,14 @@ async function evaluate(
 ): Promise<AggregateResult> {
   const normalizedTitles = new Set(noteTitles.map(normalize));
   const perFile: PerFileResult[] = [];
+  const evalT0 = Date.now();
+  process.stderr.write(
+    `[${new Date().toISOString()}] evaluate[${name}]: starting, files=${files.length}\n`,
+  );
 
+  let fileIdx = 0;
   for (const file of files) {
+    fileIdx++;
     // Pass 1: remove aliased wikilinks before ground truth extraction
     const pass1Content = removeAliasedWikilinks(file.content);
     const rawGroundTruth = extractGroundTruth(pass1Content, file.basename);
@@ -214,8 +223,18 @@ async function evaluate(
     // Pass 2: strip unlinked title mentions, then convert remaining wikilinks to plain text
     const pass2Content = stripUnlinkedMentions(pass1Content, noteTitles, file.basename);
     const strippedContent = stripWikilinksForEval(pass2Content);
+    const tPhrase = Date.now();
     const phrases = extractFn(strippedContent, vaultContext);
+    const phraseMs = Date.now() - tPhrase;
+    process.stderr.write(
+      `[${new Date().toISOString()}] evaluate[${name}] [${fileIdx}/${files.length}] file=${file.basename.slice(0, 50)} phrases=${phrases.length} extract=${phraseMs}ms → resolving…\n`,
+    );
+    const tResolve = Date.now();
     const candidates = await resolveFn(phrases, noteTitles, file.basename + ".md");
+    const resolveMs = Date.now() - tResolve;
+    process.stderr.write(
+      `[${new Date().toISOString()}] evaluate[${name}] [${fileIdx}/${files.length}] file=${file.basename.slice(0, 50)} resolve=${resolveMs}ms candidates=${candidates.length}\n`,
+    );
 
     const predicted = new Set<string>(candidates.map((c) => normalize(c.targetPath)));
     const tpList: string[] = [];
@@ -251,6 +270,9 @@ async function evaluate(
   const recall = totalTP + totalFN > 0 ? totalTP / (totalTP + totalFN) : 0;
   const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
 
+  process.stderr.write(
+    `[${new Date().toISOString()}] evaluate[${name}]: done, filesEvaluated=${perFile.length} totalMs=${Date.now() - evalT0}\n`,
+  );
   return { name, filesEvaluated: perFile.length, totalTP, totalFP, totalFN, precision, recall, f1, perFile };
 }
 
@@ -296,63 +318,6 @@ class PipelineEmbeddingProvider implements EmbeddingProvider {
 
   async dispose(): Promise<void> {
     this.extractor = null;
-  }
-}
-
-/**
- * AutoModel-based provider for EmbeddingGemma (uses AutoModel + AutoTokenizer
- * instead of the pipeline API).
- */
-class GemmaEmbeddingProvider implements EmbeddingProvider {
-  readonly dims: number;
-  private modelId: string;
-  private dtype: string;
-  private model: any = null;
-  private tokenizer: any = null;
-
-  constructor(modelId: string, dims: number, dtype: string = "q4") {
-    this.modelId = modelId;
-    this.dims = dims;
-    this.dtype = dtype;
-  }
-
-  private async ensureModel(): Promise<void> {
-    if (this.model) return;
-    const { AutoModel, AutoTokenizer, env } = require("@huggingface/transformers");
-    env.allowLocalModels = true;
-    env.useBrowserCache = false;
-    console.log(`  Loading ${this.modelId} (${this.dtype})...`);
-    this.tokenizer = await AutoTokenizer.from_pretrained(this.modelId);
-    this.model = await AutoModel.from_pretrained(this.modelId, {
-      dtype: this.dtype,
-    });
-    console.log(`  Model loaded.`);
-  }
-
-  async embed(text: string): Promise<Float32Array> {
-    const [result] = await this.embedBatch([text]);
-    return result;
-  }
-
-  async embedBatch(texts: string[]): Promise<Float32Array[]> {
-    await this.ensureModel();
-    const results: Float32Array[] = [];
-    for (const text of texts) {
-      const inputs = await this.tokenizer(text, { padding: true, truncation: true });
-      const output = await this.model(inputs);
-      const embeddings = output.last_hidden_state;
-      const dims = embeddings.dims as number[];
-      const data = embeddings.data as Float32Array;
-      const seqLen = dims[1];
-      const hiddenDim = dims[2];
-      results.push(meanPoolNormalizeL2FromLastHidden(data, seqLen, hiddenDim));
-    }
-    return results;
-  }
-
-  async dispose(): Promise<void> {
-    this.model = null;
-    this.tokenizer = null;
   }
 }
 
@@ -413,19 +378,21 @@ function printWorstRecall(result: AggregateResult, n = 10): void {
 
 // ── CLI argument parsing ────────────────────────────────────────
 
-function parseArgs(): { extractor: string; resolver: string; sparseThreshold: number } {
+function parseArgs(): { extractor: string; resolver: string; sparseThreshold: number; device: string } {
   let extractor = "all";
   let resolver = "all";
   let sparseThreshold = 0.75;
+  let device = "cpu";
   for (const arg of process.argv.slice(2)) {
     const match = arg.match(/^--([^=]+)=(.+)$/);
     if (match) {
       if (match[1] === "extractor") extractor = match[2].toLowerCase();
       if (match[1] === "resolver") resolver = match[2].toLowerCase();
       if (match[1] === "sparse-threshold") sparseThreshold = Number(match[2]);
+      if (match[1] === "device") device = match[2];
     }
   }
-  return { extractor, resolver, sparseThreshold };
+  return { extractor, resolver, sparseThreshold, device };
 }
 
 async function main(): Promise<void> {
@@ -468,7 +435,7 @@ async function main(): Promise<void> {
 
   let arcticProvider: PipelineEmbeddingProvider | null = null;
   let arcticResolver: EmbeddingResolver | null = null;
-  let gemmaProvider: GemmaEmbeddingProvider | null = null;
+  let gemmaProvider: EmbeddingProvider | null = null;
   let gemmaResolver: EmbeddingResolver | null = null;
   let sparseResolver: EmbeddingResolver | null = null;
   let sparseFeatureLabels: SAEFeatureLabels | null = null;
@@ -482,7 +449,9 @@ async function main(): Promise<void> {
   }
 
   if (args.resolver === "all" || args.resolver === "gemma") {
-    gemmaProvider = new GemmaEmbeddingProvider("onnx-community/embeddinggemma-300m-ONNX", 768, "q4");
+    gemmaProvider = createNodeEmbeddingProvider("onnx-community/embeddinggemma-300m-ONNX", 768, {
+      device: args.device,
+    });
     gemmaResolver = new EmbeddingResolver({
       embeddingProvider: gemmaProvider,
       similarityThreshold: 0.95,
@@ -496,9 +465,14 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     const sae = SparseAutoencoder.deserialize(fs.readFileSync(weightsPath));
-    sparseFeatureLabels = new SAEFeatureLabels();
-    // Reuse arctic provider if available, otherwise create one.
-    const sparseProvider = arcticProvider ?? new PipelineEmbeddingProvider("Snowflake/snowflake-arctic-embed-xs", 384);
+    sparseFeatureLabels = new SAEFeatureLabels(sae.dHidden);
+    // SAE was trained on Gemma-300m (768d) embeddings, so the sparse resolver
+    // must use the Gemma provider. Reuse it if already created.
+    const sparseProvider = gemmaProvider ?? createNodeEmbeddingProvider(
+      "onnx-community/embeddinggemma-300m-ONNX",
+      768,
+      { device: args.device },
+    );
     sparseResolver = new EmbeddingResolver({
       embeddingProvider: sparseProvider,
       sae,
@@ -506,13 +480,13 @@ async function main(): Promise<void> {
     });
     console.log(`Sparse-feature threshold: ${args.sparseThreshold}`);
     console.log(`SAE feature labels loaded: ${sparseFeatureLabels.liveCount} live features`);
-    if (!arcticProvider) arcticProvider = sparseProvider as PipelineEmbeddingProvider;
+    if (!gemmaProvider) gemmaProvider = sparseProvider;
   }
 
   const allResolvers = [
     { key: "lcs", name: "LCS", fn: (p: ExtractedPhrase[], t: string[], s: string) => deterministicResolver.resolve(p, t, s) },
     ...(arcticResolver ? [{ key: "arctic", name: "Arctic-xs (384d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => arcticResolver!.resolve(p, t, s) }] : []),
-    ...(gemmaResolver ? [{ key: "gemma", name: "Gemma-300m q4 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver!.resolve(p, t, s) }] : []),
+    ...(gemmaResolver ? [{ key: "gemma", name: "Gemma-300m q8 (768d)", fn: (p: ExtractedPhrase[], t: string[], s: string) => gemmaResolver!.resolve(p, t, s) }] : []),
     ...(sparseResolver ? [{ key: "sparse", name: "Sparse-feature (SAE)", fn: (p: ExtractedPhrase[], t: string[], s: string) => sparseResolver!.resolveBySparseFeatures(p, t, s, sparseFeatureLabels!) }] : []),
   ];
 
