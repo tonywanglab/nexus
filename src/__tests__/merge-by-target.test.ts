@@ -118,6 +118,35 @@ describe("mergeByTarget", () => {
     expect(e.sparseFeatures).toBe(sparseFeatures);
   });
 
+  it("prefers richer sparseFeatures when both dense and sparse-feature edges merge", () => {
+    // Dense resolver attaches only the top 1-2 shared features; the sparse
+    // resolver attaches up to 4 per side. When both fire for the same edge,
+    // the richer payload should win on merge.
+    const denseSF = {
+      phraseFeatures: [{ idx: 3, value: 0.2, label: "x · y · z" }],
+      titleFeatures:  [{ idx: 3, value: 0.25, label: "x · y · z" }],
+    };
+    const sparseSF = {
+      phraseFeatures: [
+        { idx: 3, value: 0.2, label: "x · y · z" },
+        { idx: 5, value: 0.15, label: "p · q · r" },
+        { idx: 7, value: 0.1, label: "m · n · o" },
+      ],
+      titleFeatures: [
+        { idx: 3, value: 0.25, label: "x · y · z" },
+        { idx: 5, value: 0.18, label: "p · q · r" },
+        { idx: 8, value: 0.12, label: "u · v · w" },
+      ],
+    };
+    const edges = [
+      makeEdge("graph theory", "id-tgt", 0.78, "stochastic", "id-src", { sparseFeatures: denseSF }),
+      makeEdge("graph theory", "id-tgt", 0.84, "sparse-feature", "id-src", { sparseFeatures: sparseSF }),
+    ];
+    const out = mergeByTarget(edges);
+    expect(out).toHaveLength(1);
+    expect(out[0].sparseFeatures).toBe(sparseSF);
+  });
+
   it("sparse-only edge carries sparseFeatures and matchedBy=['sparse']", () => {
     const sparseFeatures = {
       phraseFeatures: [{ idx: 1, value: 0.3, label: "a · b · c" }],
