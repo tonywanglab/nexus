@@ -13,3 +13,16 @@ data/vocab-manifest.json
 *.f32.bin
 *.xml.bz2
 *.gz
+
+# Local Obsidian vault
+senior-thesis-vault/
+
+# Modal output artifacts
+modal-out/
+modal-out-v2/
+modal-smoke/
+assets/runs/
+
+# Python cache
+scripts/__pycache__/
+data/

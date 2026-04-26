@@ -6,14 +6,15 @@ import { resolve, join } from "path";
 
 const prod = process.argv[2] === "production";
 
-// Read vault path from .env for dev mode
+// Optional: set VAULT_PATH in .env so main.js + manifest.json deploy to the vault (dev + production).
 let vaultPluginDir = null;
-if (!prod && existsSync(".env")) {
+if (existsSync(".env")) {
   const lines = readFileSync(".env", "utf-8").split("\n");
   for (const line of lines) {
     const match = line.match(/^VAULT_PATH=(.+)$/);
     if (match) {
       vaultPluginDir = resolve(match[1].trim(), ".obsidian", "plugins", "nexus");
+      break;
     }
   }
 }
@@ -23,8 +24,9 @@ const outfile = vaultPluginDir ? join(vaultPluginDir, "main.js") : "main.js";
 // Ensure output directory exists when targeting vault
 if (vaultPluginDir) {
   mkdirSync(vaultPluginDir, { recursive: true });
-  // Copy manifest so Obsidian recognizes the plugin
+  // Copy manifest and styles so Obsidian recognizes the plugin
   copyFileSync("manifest.json", join(vaultPluginDir, "manifest.json"));
+  if (existsSync("styles.css")) copyFileSync("styles.css", join(vaultPluginDir, "styles.css"));
 }
 
 const context = await esbuild.context({
