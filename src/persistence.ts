@@ -11,7 +11,7 @@ export function deserialize(raw: unknown): PersistedState {
   const obj = raw as Record<string, unknown>;
   if (obj["version"] !== 1) return defaults;
 
-  return {
+  const result: PersistedState = {
     version: 1,
     similarityThreshold:
       typeof obj["similarityThreshold"] === "number"
@@ -30,4 +30,10 @@ export function deserialize(raw: unknown): PersistedState {
       ? (obj["approvals"] as PersistedState["approvals"])
       : [],
   };
+
+  if (obj["labelOverrides"] != null && typeof obj["labelOverrides"] === "object" && !Array.isArray(obj["labelOverrides"])) {
+    result.labelOverrides = obj["labelOverrides"] as Record<number, string>;
+  }
+
+  return result;
 }

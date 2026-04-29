@@ -13,6 +13,7 @@ export interface LabeledFeatures {
 
 export class SAEFeatureLabels {
   private _labels: FeatureLabel[];
+  private _overrides: Map<number, string>;
 
   constructor(saeDHidden?: number) {
     const raw = (labels as any).labels as FeatureLabel[];
@@ -22,6 +23,15 @@ export class SAEFeatureLabels {
     while (this._labels.length < target) {
       this._labels.push(empty());
     }
+    this._overrides = new Map();
+  }
+
+  setOverrides(overrides: Record<number, string>): void {
+    this._overrides = new Map(Object.entries(overrides).map(([k, v]) => [Number(k), v]));
+  }
+
+  setOverride(idx: number, label: string): void {
+    this._overrides.set(idx, label);
   }
 
   get liveCount(): number {
@@ -30,9 +40,10 @@ export class SAEFeatureLabels {
 
   /** Returns the synthesized concept label for live features, null for dead. */
   labelFor(idx: number): string | null {
+    if (this._overrides.has(idx)) return this._overrides.get(idx)!;
     const l = this._labels[idx];
     if (!l || l.candidates.length === 0) return null;
-    return l.candidates[0];
+    return l.candidates.join(" · ");
   }
 
   /** Returns the top-10 raw vocab terms for the atom (evidence behind the label), or null. */
