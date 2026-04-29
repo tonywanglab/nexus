@@ -2,7 +2,7 @@ import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { SparseEncoding } from "../resolver/sae";
 
 // Mock the JSON module so tests don't depend on the real asset file.
-jest.mock("../../assets/sae-feature-labels.json", () => ({
+jest.mock("../../assets/sae-feature-labels-v2.json", () => ({
   dHidden: 6,
   vocabSize: 10,
   vocabSource: "test",
@@ -41,12 +41,12 @@ describe("SAEFeatureLabels", () => {
   });
 
   describe("labelFor", () => {
-    it("returns joined candidates for a live feature", () => {
-      expect(fl.labelFor(0)).toBe("politician · statesman · senator");
+    it("returns the top candidate for a live feature", () => {
+      expect(fl.labelFor(0)).toBe("politician");
     });
 
-    it("joins only the available candidates (fewer than 3)", () => {
-      expect(fl.labelFor(1)).toBe("economy · finance");
+    it("returns the top available candidate when fewer than 3 exist", () => {
+      expect(fl.labelFor(1)).toBe("economy");
     });
 
     it("returns single candidate without separator", () => {
@@ -65,7 +65,7 @@ describe("SAEFeatureLabels", () => {
     it("pads to saeDHidden with empty label slots for higher indices", () => {
       const padded = new SAEFeatureLabels(10);
       expect(padded.labelFor(7)).toBeNull();
-      expect(padded.labelFor(0)).toBe("politician · statesman · senator");
+      expect(padded.labelFor(0)).toBe("politician");
     });
   });
 
@@ -79,7 +79,7 @@ describe("SAEFeatureLabels", () => {
       expect(result.values[1]).toBe(4);
       expect(result.values[2]).toBe(3);
       expect(result.values[3]).toBe(2);
-      expect(result.labels[0]).toBe("politician · statesman · senator");
+      expect(result.labels[0]).toBe("politician");
     });
 
     it("degrades gracefully when fewer than 4 live features are active", () => {
@@ -87,7 +87,7 @@ describe("SAEFeatureLabels", () => {
       const enc = makeEncoding([[0, 1.0], [2, 0.9], [4, 0.8]]);
       const result = fl.pickTop4Labeled(enc);
       expect(result.indices).toEqual([0]);
-      expect(result.labels).toEqual(["politician · statesman · senator"]);
+      expect(result.labels).toEqual(["politician"]);
     });
 
     it("returns empty arrays when no active features are labeled", () => {
