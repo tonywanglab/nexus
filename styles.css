@@ -10,6 +10,7 @@
 .nexus-toolbar {
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 10px 0 8px;
   margin-bottom: 2px;
 }
@@ -17,6 +18,7 @@
 /* ── Tabs ── */
 .nexus-tabs {
   display: flex;
+  justify-content: center;
   gap: 2px;
   padding-bottom: 10px;
   margin-bottom: 6px;
@@ -172,11 +174,17 @@
   background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
   color: var(--interactive-accent);
   font-weight: 600;
+  cursor: pointer;
+}
+
+.nexus-sparse-chip-match:hover {
+  opacity: 0.8;
 }
 
 /* ── Card actions ── */
 .nexus-card-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
   margin-top: 2px;
 }
@@ -220,5 +228,22 @@
   font-size: 11px;
   padding: 3px 10px;
   color: var(--text-muted);
+}
+
+/* ── Rename label modal ── */
+.nexus-rename-input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.nexus-modal-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.nexus-modal-hint {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
 }
 
