@@ -72,6 +72,7 @@ export interface PersistedState {
   edges: Record<NoteId, CandidateEdge[]>;
   denials: DenialRecord[];
   approvals: ApprovalRecord[];
+  labelOverrides?: Record<number, string>;
 }
 
 export const DEFAULT_SIMILARITY_THRESHOLD = 0.7;
@@ -84,6 +85,7 @@ export function createEmptyPersistedState(): PersistedState {
     edges: {},
     denials: [],
     approvals: [],
+    labelOverrides: {},
   };
 }
 

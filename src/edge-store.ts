@@ -221,6 +221,11 @@ export class EdgeStore {
     return () => this.listeners.delete(listener);
   }
 
+  /** Triggers a view refresh without changing underlying data. */
+  refreshViews(): void {
+    this.notify();
+  }
+
   // ── lifecycle ────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
