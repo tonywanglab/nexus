@@ -30,6 +30,23 @@ export interface EmbeddingResolverOptions {
   phraseCacheLimit?: number;
   /** Invoked when the title embedding cache gains new entries worth persisting. */
   onTitleEmbeddingsChanged?: (map: Map<string, Float32Array>) => void;
+  /**
+   * Optional benchmark hook. When provided, the resolver records per-phase
+   * durations (titleEmbed / phraseEmbed / denseMatch / sparseEncode / sparseMatch).
+   * No-op for production; used by `scripts/benchmark-runtime.ts`.
+   */
+  phaseTimings?: PhaseRecorder;
+}
+
+export type PhaseName =
+  | "titleEmbed"
+  | "phraseEmbed"
+  | "denseMatch"
+  | "sparseEncode"
+  | "sparseMatch";
+
+export interface PhaseRecorder {
+  record(phase: PhaseName, ms: number): void;
 }
 
 const DEFAULTS = {
@@ -64,6 +81,7 @@ export class EmbeddingResolver {
   private phraseSparseCache = new Map<string, SparseEncoding>();
   private phraseCacheLimit: number;
   private onTitleEmbeddingsChanged: ((m: Map<string, Float32Array>) => void) | undefined;
+  private phaseTimings: PhaseRecorder | undefined;
 
   constructor(options: EmbeddingResolverOptions) {
     this.provider = options.embeddingProvider;
@@ -74,6 +92,7 @@ export class EmbeddingResolver {
     this.denseExplanationTopN = options.denseExplanationTopN ?? DEFAULTS.denseExplanationTopN;
     this.phraseCacheLimit = options.phraseCacheLimit ?? DEFAULTS.phraseCacheLimit;
     this.onTitleEmbeddingsChanged = options.onTitleEmbeddingsChanged;
+    this.phaseTimings = options.phaseTimings;
   }
 
   /** Swap in a new SAE + labels (e.g. after a version toggle). Clears the sparse cache. */
@@ -108,7 +127,9 @@ export class EmbeddingResolver {
       }
     }
     if (missTexts.length > 0) {
+      const t0 = this.phaseTimings ? performance.now() : 0;
       const fresh = await this.provider.embedBatch(missTexts, { priority });
+      if (this.phaseTimings) this.phaseTimings.record("phraseEmbed", performance.now() - t0);
       for (let i = 0; i < missTexts.length; i++) {
         this.phraseEmbeddingCache.set(missTexts[i], fresh[i]);
       }
@@ -164,6 +185,7 @@ export class EmbeddingResolver {
     let phraseSparseEncodings: SparseEncoding[] | undefined;
     if (this.sae) {
       const yieldIfNeeded = makeYielder();
+      const tSparseEncode0 = this.phaseTimings ? performance.now() : 0;
       titleSparseEncodings = new Map();
       for (const title of filteredTitles) {
         await yieldIfNeeded();
@@ -187,8 +209,10 @@ export class EmbeddingResolver {
         }
         phraseSparseEncodings.push(enc);
       }
+      if (this.phaseTimings) this.phaseTimings.record("sparseEncode", performance.now() - tSparseEncode0);
     }
 
+    const tDenseMatch0 = this.phaseTimings ? performance.now() : 0;
     const candidates = await scorePhrasesAgainstTitles({
       phrases,
       phraseEmbeddings,
@@ -198,6 +222,7 @@ export class EmbeddingResolver {
       similarityThreshold: this.similarityThreshold,
       maxCandidatesPerPhrase: this.maxCandidatesPerPhrase,
     });
+    if (this.phaseTimings) this.phaseTimings.record("denseMatch", performance.now() - tDenseMatch0);
 
     // Annotate each dense edge with the top shared labeled SAE features that
     // explain the dense match — interpretability for free.
@@ -249,6 +274,7 @@ export class EmbeddingResolver {
     // encodeSparse actually runs. Shared across both phase loops so we don't
     // over-yield at the boundary between them.
     const yieldIfNeeded = makeYielder();
+    const tSparseEncode0 = this.phaseTimings ? performance.now() : 0;
     const titleMatchFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickAllLabeled"]>>();
     const titleDisplayFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickTop4Labeled"]>>();
     for (const title of filteredTitles) {
@@ -263,7 +289,9 @@ export class EmbeddingResolver {
       titleMatchFeatures.set(title, featureLabels.pickAllLabeled(enc));
       titleDisplayFeatures.set(title, featureLabels.pickTop4Labeled(enc));
     }
+    if (this.phaseTimings) this.phaseTimings.record("sparseEncode", performance.now() - tSparseEncode0);
 
+    const tSparseMatch0 = this.phaseTimings ? performance.now() : 0;
     const candidates: CandidateEdge[] = [];
 
     for (let pi = 0; pi < phrases.length; pi++) {
@@ -314,6 +342,7 @@ export class EmbeddingResolver {
       phraseCandidates.sort((a, b) => b.similarity - a.similarity);
       candidates.push(...phraseCandidates.slice(0, maxCandidatesPerPhrase));
     }
+    if (this.phaseTimings) this.phaseTimings.record("sparseMatch", performance.now() - tSparseMatch0);
 
     return dedupAndRank(candidates);
   }
@@ -324,7 +353,9 @@ export class EmbeddingResolver {
   ): Promise<Map<string, Float32Array>> {
     const toEmbed = titles.filter(t => !this.titleEmbeddingCache.has(t));
     if (toEmbed.length > 0) {
+      const t0 = this.phaseTimings ? performance.now() : 0;
       const embeddings = await this.provider.embedBatch(toEmbed, { priority });
+      if (this.phaseTimings) this.phaseTimings.record("titleEmbed", performance.now() - t0);
       for (let i = 0; i < toEmbed.length; i++) {
         this.titleEmbeddingCache.set(toEmbed[i], embeddings[i]);
       }
