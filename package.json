@@ -37,7 +37,10 @@
     "vocab:embed": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true}' scripts/embed-vocab.ts",
     "train:sae-modal": "modal run scripts/modal_train_sae_v2.py --vocab data/vocab.txt --out-dir ./modal-out-v2",
     "label:autointerp": "modal run scripts/modal_autointerp_vocab.py --weights assets/sae-weights-v2.bin --out assets/sae-feature-labels-v2.json",
-    "label:autointerp:broad": "modal run scripts/modal_autointerp_vocab.py --weights assets/sae-weights-v2.bin --out assets/sae-feature-labels-v2.json --broad-vocab"
+    "label:autointerp:broad": "modal run scripts/modal_autointerp_vocab.py --weights assets/sae-weights-v2.bin --out assets/sae-feature-labels-v2.json --broad-vocab",
+    "bench:runtime": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\",\"esModuleInterop\":true,\"resolveJsonModule\":true}' scripts/benchmark-runtime.ts",
+    "bench:runtime:quick": "npm run bench:runtime -- --sample=20",
+    "bench:runtime:full": "npm run bench:runtime -- --sweep=all"
   },
   "author": "Tony Wang",
   "license": "MIT",

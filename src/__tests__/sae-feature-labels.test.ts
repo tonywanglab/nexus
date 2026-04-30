@@ -2,7 +2,7 @@ import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { SparseEncoding } from "../resolver/sae";
 
 // Mock the JSON module so tests don't depend on the real asset file.
-jest.mock("../../assets/sae-feature-labels.json", () => ({
+jest.mock("../../assets/sae-feature-labels-v2.json", () => ({
   dHidden: 6,
   vocabSize: 10,
   vocabSource: "test",
