@@ -69,6 +69,7 @@ export default class NexusPlugin extends Plugin {
     });
     const sae = loadBundledSAE();
     this.featureLabels = new SAEFeatureLabels(sae.dHidden);
+    this.featureLabels.setOverrides(persisted.labelOverrides ?? {});
     console.log(
       `Nexus: loaded SAE (d_model=${sae.dModel}, d_hidden=${sae.dHidden}, k=${sae.k}), feature labels: ${this.featureLabels.liveCount}/${sae.dHidden} live`,
     );
@@ -435,6 +436,16 @@ export default class NexusPlugin extends Plugin {
       await leaf.setViewState({ type: APPROVAL_VIEW_TYPE, active: true });
     }
     workspace.revealLeaf(leaf);
+  }
+
+  async saveLabelOverride(idx: number, label: string): Promise<void> {
+    this.featureLabels.setOverride(idx, label);
+    const raw = await this.loadData();
+    const state = deserialize(raw);
+    if (!state.labelOverrides) state.labelOverrides = {};
+    (state.labelOverrides as any)[idx] = label;
+    await this.saveData(serialize(state));
+    this.edgeStore.refreshViews();
   }
 
   async onunload() {
