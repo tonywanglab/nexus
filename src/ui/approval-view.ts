@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, App, Modal } from "obsidian";
 import { CandidateEdge, NoteId, Resolver } from "../types";
 import { EdgeStore } from "../edge-store";
 
@@ -274,9 +274,11 @@ export class NexusApprovalView extends ItemView {
     // Collapse the phrase/title payloads into the features that fire on both
     // sides — the interpretable "why these two match" signal. Rank by pVal*tVal
     // (the feature's literal contribution to sparseCosine), and cap at 2 chips.
+    const featureLabels = (this.plugin as any).featureLabels;
     const phraseByIdx = new Map<number, { value: number; label: string }>();
     for (const f of sparseFeatures.phraseFeatures) {
-      phraseByIdx.set(f.idx, { value: f.value, label: f.label });
+      const currentLabel = featureLabels.labelFor(f.idx) ?? f.label;
+      phraseByIdx.set(f.idx, { value: f.value, label: currentLabel });
     }
     const shared: { idx: number; label: string; score: number }[] = [];
     for (const tf of sparseFeatures.titleFeatures) {
@@ -291,8 +293,22 @@ export class NexusApprovalView extends ItemView {
     const el = card.createEl("div", { cls: "nexus-sparse-features" });
     const chips = el.createEl("div", { cls: "nexus-sparse-chips" });
     for (const f of top) {
-      chips.createEl("span", { text: f.label, cls: "nexus-sparse-chip nexus-sparse-chip-match" });
+      const currentLabel = featureLabels.labelFor(f.idx) ?? f.label;
+      const chip = chips.createEl("span", {
+        text: currentLabel,
+        cls: "nexus-sparse-chip nexus-sparse-chip-match",
+      });
+      chip.dataset.featureIdx = String(f.idx);
+      chip.addEventListener("dblclick", () => this.openRenameFlow(f.idx, currentLabel));
     }
+  }
+
+  private openRenameFlow(featureIdx: number, currentLabel: string): void {
+    new RenameFeatureLabelModal(this.app, currentLabel, (newLabel) => {
+      new ConfirmRenameLabelModal(this.app, currentLabel, newLabel, async () => {
+        await (this.plugin as any).saveLabelOverride(featureIdx, newLabel);
+      }).open();
+    }).open();
   }
 
   private handleApprove(vm: CardVM): void {
@@ -336,5 +352,44 @@ export class NexusApprovalView extends ItemView {
       `Nexus: deny click — sourceId=${vm.sourceId || "(empty)"} target=${vm.targetTitle} targetId=${vm.targetId || "(empty)"} phrase="${vm.phraseText}"`,
     );
     this.store.denyEdge(vm.sourceId, vm.phraseText, vm.targetId);
+  }
+}
+
+class RenameFeatureLabelModal extends Modal {
+  private input!: HTMLInputElement;
+  constructor(app: App, private current: string, private onSubmit: (v: string) => void) {
+    super(app);
+  }
+  onOpen() {
+    this.titleEl.setText("Rename feature label");
+    this.input = this.contentEl.createEl("input", { type: "text", value: this.current });
+    this.input.addClass("nexus-rename-input");
+    this.input.select();
+    const footer = this.contentEl.createEl("div", { cls: "nexus-modal-footer" });
+    footer.createEl("button", { text: "Next →" }).addEventListener("click", () => {
+      const val = this.input.value.trim();
+      if (val && val !== this.current) { this.close(); this.onSubmit(val); }
+    });
+    footer.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    this.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { const val = this.input.value.trim(); if (val && val !== this.current) { this.close(); this.onSubmit(val); } }
+      if (e.key === "Escape") this.close();
+    });
+  }
+}
+
+class ConfirmRenameLabelModal extends Modal {
+  constructor(app: App, private oldLabel: string, private newLabel: string, private onConfirm: () => void) {
+    super(app);
+  }
+  onOpen() {
+    this.titleEl.setText("Confirm rename");
+    this.contentEl.createEl("p", { text: `Rename "${this.oldLabel}" → "${this.newLabel}"?` });
+    this.contentEl.createEl("p", { text: "This will update all cards and persist across sessions.", cls: "nexus-modal-hint" });
+    const footer = this.contentEl.createEl("div", { cls: "nexus-modal-footer" });
+    footer.createEl("button", { text: "Yes, rename", cls: "mod-cta" }).addEventListener("click", () => {
+      this.close(); this.onConfirm();
+    });
+    footer.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
   }
 }
