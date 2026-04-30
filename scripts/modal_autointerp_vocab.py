@@ -39,7 +39,7 @@ import numpy as np
 LLM_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
 EMBED_MODEL_ID = "google/embeddinggemma-300m"
 EMBED_DIMS = 768
-CONCEPTNET_URL = "https://conceptnet.s3.amazonaws.com/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
+CONCEPTNET_URL = "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
 
 # Default paths for the cached broad-vocab files
 DEFAULT_EXTRA_VOCAB_PATH = "data/broad-vocab-extra.txt"

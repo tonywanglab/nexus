@@ -34,6 +34,22 @@ export class SAEFeatureLabels {
     this._overrides.set(idx, label);
   }
 
+  /** Replace labels from a parsed sae-feature-labels.json object. */
+  loadFromJSON(data: { labels: FeatureLabel[] }): void {
+    const empty = (): FeatureLabel => ({ candidates: [], scores: [] });
+    this._labels = data.labels.slice(0, this._labels.length);
+    while (this._labels.length < this._labels.length) this._labels.push(empty());
+  }
+
+  /** Create an instance from a parsed sae-feature-labels.json without the static default. */
+  static fromJSON(data: { labels: FeatureLabel[] }, dHidden: number): SAEFeatureLabels {
+    const instance = Object.create(SAEFeatureLabels.prototype) as SAEFeatureLabels;
+    const empty = (): FeatureLabel => ({ candidates: [], scores: [] });
+    (instance as any)._labels = data.labels.slice(0, dHidden);
+    while ((instance as any)._labels.length < dHidden) (instance as any)._labels.push(empty());
+    return instance;
+  }
+
   get liveCount(): number {
     return this._labels.filter(l => l.candidates.length > 0).length;
   }

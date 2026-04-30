@@ -146,6 +146,10 @@ export class EmbeddingResolver {
     return out;
   }
 
+  /**
+   * Resolve phrases to note titles using dense embedding cosine similarity.
+   * Delegates to `resolveWithSparse`; use that directly when SAE encodings are needed.
+   */
   async resolve(
     phrases: ExtractedPhrase[],
     noteTitles: string[],
@@ -224,8 +228,6 @@ export class EmbeddingResolver {
     });
     if (this.phaseTimings) this.phaseTimings.record("denseMatch", performance.now() - tDenseMatch0);
 
-    // Annotate each dense edge with the top shared labeled SAE features that
-    // explain the dense match — interpretability for free.
     if (this.featureLabels && phraseSparseEncodings && titleSparseEncodings) {
       const phraseIndex = new Map<ExtractedPhrase, number>();
       for (let i = 0; i < phrases.length; i++) phraseIndex.set(phrases[i], i);
@@ -309,8 +311,6 @@ export class EmbeddingResolver {
       phraseMatchFeatures[pi] = featureLabels.pickAllLabeled(phraseEnc);
       phraseDisplayFeatures[pi] = featureLabels.pickTop4Labeled(phraseEnc);
     }
-
-    const candidates: CandidateEdge[] = [];
 
     for (let pi = 0; pi < phrases.length; pi++) {
       await yieldIfNeeded();

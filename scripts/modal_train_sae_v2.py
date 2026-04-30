@@ -37,7 +37,7 @@ GPU = "L4"
 
 DECODER_RENORM_EVERY = 100
 WIKI_TITLES_URL = "https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-all-titles-in-ns0.gz"
-CONCEPTNET_URL = "https://conceptnet.s3.amazonaws.com/downloads/2019/conceptnet-assertions-5.7.0.csv.gz"
+CONCEPTNET_URL = "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
