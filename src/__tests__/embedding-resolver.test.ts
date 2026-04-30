@@ -10,7 +10,7 @@ import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { ExtractedPhrase } from "../types";
 
 // Stub the labels JSON so the test is deterministic — all 32 features get labels.
-jest.mock("../../assets/sae-feature-labels.json", () => {
+jest.mock("../../assets/sae-feature-labels-v2.json", () => {
   const labels = Array.from({ length: 32 }, (_, i) => ({
     candidates: [`concept${i}`, `word${i}`, `idea${i}`],
     scores: [0.9 - i * 0.01, 0.8 - i * 0.01, 0.7 - i * 0.01],

@@ -269,7 +269,9 @@ export class EmbeddingResolver {
     const phraseTexts = phrases.map(p => p.phrase);
     const phraseEmbeddings = await this.embedPhrases(phraseTexts, priority);
 
-    // Pre-compute sparse features for all titles, using the session cache.
+    // Pre-compute sparse features for all titles and phrases, using the
+    // session cache. Keeping all encodeSparse cache misses in this phase makes
+    // sparse-feature benchmarking comparable with resolveWithSparse.
     // Time-budget yielder: skips yields on warm cache, yields promptly when
     // encodeSparse actually runs. Shared across both phase loops so we don't
     // over-yield at the boundary between them.
@@ -277,6 +279,8 @@ export class EmbeddingResolver {
     const tSparseEncode0 = this.phaseTimings ? performance.now() : 0;
     const titleMatchFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickAllLabeled"]>>();
     const titleDisplayFeatures = new Map<string, ReturnType<SAEFeatureLabels["pickTop4Labeled"]>>();
+    const phraseMatchFeatures: Array<ReturnType<SAEFeatureLabels["pickAllLabeled"]>> = [];
+    const phraseDisplayFeatures: Array<ReturnType<SAEFeatureLabels["pickTop4Labeled"]>> = [];
     for (const title of filteredTitles) {
       await yieldIfNeeded();
       const dense = titleEmbeddings.get(title);
@@ -296,15 +300,23 @@ export class EmbeddingResolver {
 
     for (let pi = 0; pi < phrases.length; pi++) {
       await yieldIfNeeded();
-      const phrase = phrases[pi];
       const phraseText = phraseTexts[pi];
       let phraseEnc = this.phraseSparseCache.get(phraseText);
       if (!phraseEnc) {
         phraseEnc = this.sae.encodeSparse(phraseEmbeddings[pi]);
         this.phraseSparseCache.set(phraseText, phraseEnc);
       }
-      const phraseMatch = featureLabels.pickAllLabeled(phraseEnc);
-      const phraseDisplay = featureLabels.pickTop4Labeled(phraseEnc);
+      phraseMatchFeatures[pi] = featureLabels.pickAllLabeled(phraseEnc);
+      phraseDisplayFeatures[pi] = featureLabels.pickTop4Labeled(phraseEnc);
+    }
+
+    const candidates: CandidateEdge[] = [];
+
+    for (let pi = 0; pi < phrases.length; pi++) {
+      await yieldIfNeeded();
+      const phrase = phrases[pi];
+      const phraseMatch = phraseMatchFeatures[pi];
+      const phraseDisplay = phraseDisplayFeatures[pi];
 
       if (phraseMatch.indices.length === 0) continue;
 
