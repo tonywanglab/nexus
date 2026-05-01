@@ -16,7 +16,7 @@ export class ProgressToast {
     this.notice = new Notice(this.buildMessage(), 0);
   }
 
-  /** Update the name of the file currently being processed. */
+  //  Update the name of the file currently being processed.
   setCurrent(path: string | null): void {
     this.currentFile = path;
     if (this.remaining > 0) this.notice.setMessage(this.buildMessage());

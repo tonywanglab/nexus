@@ -29,13 +29,11 @@ function legacyMatchType(matchedBy: Resolver[]): MatchType {
   return "mixed";
 }
 
-/**
- * Merges LCS + dense + sparse edges with the same (phraseKey, targetId).
- * On collision, unions `matchedBy`, keeps each resolver's score in its own
- * similarity field, carries forward `sparseFeatures` when present, and sets
- * aggregate `similarity` to the max across contributors.
- * Output is sorted by similarity descending.
- */
+// merges LCS + dense + sparse edges with the same (phraseKey, targetId).
+// on collision, unions `matchedBy`, keeps each resolver's score in its own
+// similarity field, carries forward `sparseFeatures` when present, and sets
+// aggregate `similarity` to the max across contributors.
+// output is sorted by similarity descending.
 export function mergeByTarget(edges: CandidateEdge[]): CandidateEdge[] {
   const map = new Map<string, CandidateEdge>();
 
@@ -59,9 +57,9 @@ export function mergeByTarget(edges: CandidateEdge[]): CandidateEdge[] {
       existing.matchedBy = [...(existing.matchedBy ?? []), resolver];
       existing[SIMILARITY_FIELD[resolver]] = edge.similarity;
     }
-    // Prefer richer sparseFeatures: the sparse-feature resolver emits up to 4
+    // prefer richer sparseFeatures: the sparse-feature resolver emits up to 4
     // per side; the dense resolver emits just the top 1-2 shared explanations.
-    // When both fire for the same (phrase, target), keep whichever carries more.
+    // when both fire for the same (phrase, target), keep whichever carries more.
     if (edge.sparseFeatures) {
       const incoming = edge.sparseFeatures.phraseFeatures.length
         + edge.sparseFeatures.titleFeatures.length;

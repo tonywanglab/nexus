@@ -99,7 +99,7 @@ describe("embedding-persistence", () => {
     const buf = serializeEmbeddings(map, 4);
     const { map: out } = deserializeEmbeddings(buf);
     const got = out.get("x")!;
-    // Mutating the deserialized vector must not affect the source buffer.
+    // mutating the deserialized vector must not affect the source buffer.
     got[0] = 999;
     const { map: out2 } = deserializeEmbeddings(buf);
     expect(out2.get("x")![0]).not.toBe(999);
@@ -111,7 +111,7 @@ describe("embedding-persistence", () => {
     const buf = serializeEmbeddings(map, 16);
     const { map: out } = deserializeEmbeddings(buf);
     expect(out.size).toBe(1000);
-    // Spot-check a few entries at known indices.
+    // spot-check a few entries at known indices.
     for (const i of [0, 1, 500, 999]) {
       expect(Array.from(out.get(`title-${i}`)!)).toEqual(Array.from(makeVec(16, i)));
     }

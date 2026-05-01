@@ -115,7 +115,7 @@ describe("NoteRegistry", () => {
       const initial: Record<string, NoteMeta> = {
         "id-1": { path: "old-name.md", mtime: 100, size: 42 } as NoteMeta & { size?: number },
       };
-      // NoteMeta type is {path, mtime} — we pass size as extra metadata for reconciliation.
+      // noteMeta type is {path, mtime} — we pass size as extra metadata for reconciliation.
       const reg = new NoteRegistry(initial, {
         lastSeenSize: { "id-1": 42 },
       });
@@ -137,7 +137,7 @@ describe("NoteRegistry", () => {
       ]);
       expect(result.reattached).toEqual([]);
       expect(result.dropped).toContain("id-1");
-      // Both new paths should have been given fresh ids.
+      // both new paths should have been given fresh ids.
       expect(reg.getId("new-a.md")).toBeTruthy();
       expect(reg.getId("new-b.md")).toBeTruthy();
       expect(reg.getId("new-a.md")).not.toBe("id-1");
