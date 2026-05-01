@@ -1,6 +1,4 @@
-/**
- * Helpers for building a sentence-level Wikipedia corpus (offline scripts + tests).
- */
+// helpers for building a sentence-level Wikipedia corpus (offline scripts + tests).
 
 const ENTITY_MAP: Record<string, string> = {
   amp: "&",
@@ -23,7 +21,7 @@ export function stripBasicXmlEntities(s: string): string {
   });
 }
 
-/** Split on . ! ? when followed by space or end; trim fragments. */
+//  Split on . ! ? when followed by space or end; trim fragments.
 export function splitIntoSentences(text: string): string[] {
   const out: string[] = [];
   let start = 0;

@@ -11,30 +11,24 @@ export interface EmbeddingResolverOptions {
   embeddingProvider: EmbeddingProvider;
   similarityThreshold?: number;
   maxCandidatesPerPhrase?: number;
-  /**
-   * Optional k-sparse autoencoder. When provided, the resolver additionally
-   * produces `titleSparseEmbeddings` and `phraseSparseEmbeddings` via
-   * `sae.encode()`. Scoring still uses the dense embeddings - the sparse
-   * activations are available for future downstream use.
-   */
+  // optional k-sparse autoencoder. When provided, the resolver additionally
+  // produces `titleSparseEmbeddings` and `phraseSparseEmbeddings` via
+  // `sae.encode()`. Scoring still uses the dense embeddings - the sparse
+  // activations are available for future downstream use.
   sae?: SparseAutoencoder;
-  /**
-   * Feature labels for the SAE. When provided together with `sae`, each dense
-   * edge returned by `resolve()` is annotated with the top shared labeled
-   * features that explain the dense match (see `denseExplanationTopN`).
-   */
+  // feature labels for the SAE. When provided together with `sae`, each dense
+  // edge returned by `resolve()` is annotated with the top shared labeled
+  // features that explain the dense match (see `denseExplanationTopN`).
   featureLabels?: SAEFeatureLabels;
-  /** Number of top shared labeled features to attach per dense edge. Default 2. */
+  //  Number of top shared labeled features to attach per dense edge. Default 2.
   denseExplanationTopN?: number;
-  /** FIFO cap on the vault-wide phrase embedding cache. */
+  //  FIFO cap on the vault-wide phrase embedding cache.
   phraseCacheLimit?: number;
-  /** Invoked when the title embedding cache gains new entries worth persisting. */
+  //  Invoked when the title embedding cache gains new entries worth persisting.
   onTitleEmbeddingsChanged?: (map: Map<string, Float32Array>) => void;
-  /**
-   * Optional benchmark hook. When provided, the resolver records per-phase
-   * durations (titleEmbed / phraseEmbed / denseMatch / sparseEncode / sparseMatch).
-   * No-op for production; used by `scripts/benchmark-runtime.ts`.
-   */
+  // optional benchmark hook. When provided, the resolver records per-phase
+  // durations (titleEmbed / phraseEmbed / denseMatch / sparseEncode / sparseMatch).
+  // no-op for production; used by `scripts/benchmark-runtime.ts`.
   phaseTimings?: PhaseRecorder;
 }
 
@@ -56,13 +50,11 @@ const DEFAULTS = {
   denseExplanationTopN: 2,
 };
 
-/**
- * Resolves extracted keyphrases to note titles using dense embedding
- * cosine similarity. Same input/output shape as AliasResolver but async.
- *
- * When constructed with an SAE, per-call sparse encodings of titles and
- * phrases are computed alongside the dense scoring (see `resolveWithSparse`).
- */
+// resolves extracted keyphrases to note titles using dense embedding
+// cosine similarity. Same input/output shape as AliasResolver but async.
+//
+// when constructed with an SAE, per-call sparse encodings of titles and
+// phrases are computed alongside the dense scoring (see `resolveWithSparse`).
 export class EmbeddingResolver {
   private provider: EmbeddingProvider;
   private similarityThreshold: number;
@@ -71,13 +63,13 @@ export class EmbeddingResolver {
   private featureLabels: SAEFeatureLabels | undefined;
   private denseExplanationTopN: number;
 
-  /** Cached title embeddings, invalidated when title list changes. */
+  //  Cached title embeddings, invalidated when title list changes.
   private titleEmbeddingCache = new Map<string, Float32Array>();
-  /** Sparse SAE encodings per title — computed once alongside the dense embedding. */
+  //  Sparse SAE encodings per title — computed once alongside the dense embedding.
   private titleSparseCache = new Map<string, SparseEncoding>();
-  /** Vault-wide phrase embedding cache (FIFO cap). Key is raw phrase text. */
+  //  Vault-wide phrase embedding cache (FIFO cap). Key is raw phrase text.
   private phraseEmbeddingCache = new Map<string, Float32Array>();
-  /** Sparse SAE encodings per phrase — mirrors phraseEmbeddingCache eviction. */
+  //  Sparse SAE encodings per phrase — mirrors phraseEmbeddingCache eviction.
   private phraseSparseCache = new Map<string, SparseEncoding>();
   private phraseCacheLimit: number;
   private onTitleEmbeddingsChanged: ((m: Map<string, Float32Array>) => void) | undefined;
@@ -95,27 +87,25 @@ export class EmbeddingResolver {
     this.phaseTimings = options.phaseTimings;
   }
 
-  /** Swap in a new SAE + labels (e.g. after a version toggle). Clears the sparse cache. */
+  //  Swap in a new SAE + labels (e.g. after a version toggle). Clears the sparse cache.
   updateSAE(sae: SparseAutoencoder, featureLabels: SAEFeatureLabels): void {
     this.sae = sae;
     this.featureLabels = featureLabels;
     this.titleSparseCache.clear();
   }
 
-  /** Seed the title cache from persisted state (call once on plugin load). */
+  //  Seed the title cache from persisted state (call once on plugin load).
   seedTitleEmbeddings(map: Map<string, Float32Array>): void {
     for (const [k, v] of map) this.titleEmbeddingCache.set(k, v);
   }
 
-  /** Snapshot of the current title cache for persistence. */
+  //  Snapshot of the current title cache for persistence.
   exportTitleEmbeddings(): Map<string, Float32Array> {
     return new Map(this.titleEmbeddingCache);
   }
 
-  /**
-   * Given a batch of phrase texts, return their embeddings — using and updating
-   * the vault-wide cache. Misses are batched into a single provider call.
-   */
+  // given a batch of phrase texts, return their embeddings — using and updating
+  // the vault-wide cache. Misses are batched into a single provider call.
   private async embedPhrases(
     phraseTexts: string[],
     priority: EmbeddingPriority,
@@ -134,7 +124,7 @@ export class EmbeddingResolver {
         this.phraseEmbeddingCache.set(missTexts[i], fresh[i]);
       }
     }
-    // Snapshot before eviction so the FIFO pass can't take entries needed by
+    // snapshot before eviction so the FIFO pass can't take entries needed by
     // this call out from under us.
     const out = phraseTexts.map((t) => this.phraseEmbeddingCache.get(t)!);
     while (this.phraseEmbeddingCache.size > this.phraseCacheLimit) {
@@ -146,10 +136,8 @@ export class EmbeddingResolver {
     return out;
   }
 
-  /**
-   * Resolve phrases to note titles using dense embedding cosine similarity.
-   * Delegates to `resolveWithSparse`; use that directly when SAE encodings are needed.
-   */
+  // resolve phrases to note titles using dense embedding cosine similarity.
+  // delegates to `resolveWithSparse`; use that directly when SAE encodings are needed.
   async resolve(
     phrases: ExtractedPhrase[],
     noteTitles: string[],
@@ -160,10 +148,8 @@ export class EmbeddingResolver {
     return candidates;
   }
 
-  /**
-   * Same as `resolve()` but also returns the sparse title/phrase encodings
-   * when an SAE is configured. Scoring is unchanged (dense cosine similarity).
-   */
+  // same as `resolve()` but also returns the sparse title/phrase encodings
+  // when an SAE is configured. Scoring is unchanged (dense cosine similarity).
   async resolveWithSparse(
     phrases: ExtractedPhrase[],
     noteTitles: string[],
@@ -180,7 +166,7 @@ export class EmbeddingResolver {
     const phraseTexts = phrases.map(p => p.phrase);
     const phraseEmbeddings = await this.embedPhrases(phraseTexts, priority);
 
-    // Compute and cache sparse encodings for titles and phrases when an SAE is
+    // compute and cache sparse encodings for titles and phrases when an SAE is
     // configured. Cache is shared with resolveBySparseFeatures so titles are
     // never encoded more than once per session. Time-budget yielder: warm
     // cache iterations are ~microseconds (no yield needed); cold encodeSparse
@@ -247,11 +233,9 @@ export class EmbeddingResolver {
     return { candidates: dedupAndRank(candidates) };
   }
 
-  /**
-   * Third resolver path: match phrases to titles via sparse SAE feature cosine similarity.
-   * Scoring uses all labeled active features; the edge payload carries the top-4 for display.
-   * Requires an SAE configured at construction time (throws otherwise).
-   */
+  // third resolver path: match phrases to titles via sparse SAE feature cosine similarity.
+  // scoring uses all labeled active features; the edge payload carries the top-4 for display.
+  // requires an SAE configured at construction time (throws otherwise).
   async resolveBySparseFeatures(
     phrases: ExtractedPhrase[],
     noteTitles: string[],
@@ -271,10 +255,10 @@ export class EmbeddingResolver {
     const phraseTexts = phrases.map(p => p.phrase);
     const phraseEmbeddings = await this.embedPhrases(phraseTexts, priority);
 
-    // Pre-compute sparse features for all titles and phrases, using the
+    // pre-compute sparse features for all titles and phrases, using the
     // session cache. Keeping all encodeSparse cache misses in this phase makes
     // sparse-feature benchmarking comparable with resolveWithSparse.
-    // Time-budget yielder: skips yields on warm cache, yields promptly when
+    // time-budget yielder: skips yields on warm cache, yields promptly when
     // encodeSparse actually runs. Shared across both phase loops so we don't
     // over-yield at the boundary between them.
     const yieldIfNeeded = makeYielder();
@@ -371,11 +355,11 @@ export class EmbeddingResolver {
       for (let i = 0; i < toEmbed.length; i++) {
         this.titleEmbeddingCache.set(toEmbed[i], embeddings[i]);
       }
-      // Signal persistence — only when we actually added entries. Renames/
+      // signal persistence — only when we actually added entries. Renames/
       // deletions are handled by a separate pruning pass on plugin startup.
       this.onTitleEmbeddingsChanged?.(this.titleEmbeddingCache);
     }
-    // Return a view restricted to the requested titles so callers only see the
+    // return a view restricted to the requested titles so callers only see the
     // vectors relevant to this resolve call — the internal cache is a superset.
     const out = new Map<string, Float32Array>();
     for (const t of titles) {
@@ -385,7 +369,7 @@ export class EmbeddingResolver {
     return out;
   }
 
-  /** Remove cached embeddings (dense + sparse) for titles that no longer exist in the vault. */
+  //  Remove cached embeddings (dense + sparse) for titles that no longer exist in the vault.
   pruneTitleCacheTo(activeTitles: Set<string>): number {
     let removed = 0;
     for (const k of this.titleEmbeddingCache.keys()) {
@@ -400,12 +384,10 @@ export class EmbeddingResolver {
   }
 }
 
-/**
- * Build the top-N shared labeled-feature explanation for a dense match.
- * Returns the intersection of labeled active features between phrase and title,
- * ranked so features that fire strongly on both sides come first. Returns
- * undefined when no labeled features are shared (no explanation available).
- */
+// build the top-N shared labeled-feature explanation for a dense match.
+// returns the intersection of labeled active features between phrase and title,
+// ranked so features that fire strongly on both sides come first. Returns
+// undefined when no labeled features are shared (no explanation available).
 export function buildDenseExplanation(
   phraseEnc: SparseEncoding,
   titleEnc: SparseEncoding,
@@ -435,7 +417,7 @@ export function buildDenseExplanation(
   }
   if (shared.length === 0) return undefined;
 
-  // Rank by pVal * tVal — each feature's literal contribution to
+  // rank by pVal * tVal — each feature's literal contribution to
   // sparseCosine(p, t) = Σ(pVal · tVal) / (|p|·|t|), so the top entries are
   // the features that most explain the dense match.
   shared.sort((a, b) => b.pVal * b.tVal - a.pVal * a.tVal);
@@ -447,11 +429,9 @@ export function buildDenseExplanation(
   };
 }
 
-/**
- * Score each phrase against all titles via dense cosine similarity and return
- * the top-N candidates per phrase. Pure function - does not hold state and
- * does not dedup cross-phrase (callers should pipe through `dedupAndRank`).
- */
+// score each phrase against all titles via dense cosine similarity and return
+// the top-N candidates per phrase. Pure function - does not hold state and
+// does not dedup cross-phrase (callers should pipe through `dedupAndRank`).
 export async function scorePhrasesAgainstTitles(params: {
   phrases: ExtractedPhrase[];
   phraseEmbeddings: Float32Array[];

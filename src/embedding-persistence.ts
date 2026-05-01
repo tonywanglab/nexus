@@ -1,18 +1,16 @@
-/**
- * Binary persistence for text→embedding maps (title embeddings today, phrase
- * embeddings possibly later). Skips JSON inflation of Float32 arrays and
- * keeps load/save cheap for vaults with thousands of titles.
- *
- * Format (little-endian):
- *   magic:  "NXEB" (4 bytes)
- *   version: u32 (currently 1)
- *   dim: u32
- *   count: u32
- *   entries[count]:
- *     textLen: u32 (bytes of UTF-8)
- *     textBytes: u8[textLen]
- *     vec: f32[dim]
- */
+// binary persistence for text→embedding maps (title embeddings today, phrase
+// embeddings possibly later). Skips JSON inflation of Float32 arrays and
+// keeps load/save cheap for vaults with thousands of titles.
+//
+// format (little-endian):
+//   magic:  "NXEB" (4 bytes)
+//   version: u32 (currently 1)
+//   dim: u32
+//   count: u32
+//   entries[count]:
+//     textLen: u32 (bytes of UTF-8)
+//     textBytes: u8[textLen]
+//     vec: f32[dim]
 
 const MAGIC = 0x4245584e; // "NXEB" little-endian
 const VERSION = 1;
@@ -69,7 +67,7 @@ export function deserializeEmbeddings(buf: ArrayBuffer): DeserializedEmbeddings 
   for (let i = 0; i < count; i++) {
     const textLen = view.getUint32(o, true); o += 4;
     const text = decoder.decode(new Uint8Array(buf, o, textLen)); o += textLen;
-    // Copy into a fresh Float32Array — slicing the underlying buffer keeps the
+    // copy into a fresh Float32Array — slicing the underlying buffer keeps the
     // mmap-style reference alive and misaligned reads can fail on some runtimes.
     const vec = new Float32Array(dim);
     const src = new Float32Array(buf.slice(o, o + dim * 4));

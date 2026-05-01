@@ -21,7 +21,7 @@ describe("SpanExtractor", () => {
 
     it("returns empty array for stopwords-only text", async () => {
       const result = await extractor.extract("the and or but is are");
-      // All spans end with a stopword, so all should be filtered
+      // all spans end with a stopword, so all should be filtered
       // except spans where the last word is not a stopword — "the" etc. are stopwords
       expect(result.length).toBe(0);
     });
@@ -78,7 +78,7 @@ describe("SpanExtractor", () => {
       const text = tokens.join(" ");
       const result = await extractor.extract(text);
 
-      // Should have spans of various lengths
+      // should have spans of various lengths
       const phraseLengths = result.map((p) => p.phrase.split(" ").length);
       expect(Math.max(...phraseLengths)).toBeLessThanOrEqual(10);
       expect(phraseLengths).toContain(1);
@@ -105,7 +105,7 @@ describe("SpanExtractor", () => {
       for (const phrase of result) {
         const words = phrase.phrase.split(" ");
         const lastWord = words[words.length - 1].toLowerCase();
-        // Common stopwords: "the", "of", "is"
+        // common stopwords: "the", "of", "is"
         expect(["the", "of", "is"].includes(lastWord)).toBe(false);
       }
     });

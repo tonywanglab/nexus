@@ -7,7 +7,7 @@ export interface LabeledFeatures {
   indices: number[];
   values: number[];
   labels: string[];
-  /** Top vocab terms per feature (evidence behind each label). Parallel to indices/labels. */
+  //  Top vocab terms per feature (evidence behind each label). Parallel to indices/labels.
   terms: Array<string[] | null>;
 }
 
@@ -34,14 +34,12 @@ export class SAEFeatureLabels {
     this._overrides.set(idx, label);
   }
 
-  /** Replace labels from a parsed sae-feature-labels.json object. */
   loadFromJSON(data: { labels: FeatureLabel[] }): void {
     const empty = (): FeatureLabel => ({ candidates: [], scores: [] });
     this._labels = data.labels.slice(0, this._labels.length);
     while (this._labels.length < this._labels.length) this._labels.push(empty());
   }
 
-  /** Create an instance from a parsed sae-feature-labels.json without the static default. */
   static fromJSON(data: { labels: FeatureLabel[] }, dHidden: number): SAEFeatureLabels {
     const instance = Object.create(SAEFeatureLabels.prototype) as SAEFeatureLabels;
     const empty = (): FeatureLabel => ({ candidates: [], scores: [] });
@@ -54,7 +52,6 @@ export class SAEFeatureLabels {
     return this._labels.filter(l => l.candidates.length > 0).length;
   }
 
-  /** Returns the synthesized concept label for live features, null for dead. */
   labelFor(idx: number): string | null {
     if (this._overrides.has(idx)) return this._overrides.get(idx)!;
     const l = this._labels[idx];
@@ -62,25 +59,20 @@ export class SAEFeatureLabels {
     return l.candidates.join(" · ");
   }
 
-  /** Returns the top-10 raw vocab terms for the atom (evidence behind the label), or null. */
   termsFor(idx: number): string[] | null {
     const l = this._labels[idx];
     if (!l || l.candidates.length === 0) return null;
     return l.topTerms ?? null;
   }
 
-  /**
-   * All active features in `enc` that have a label, sorted by activation desc.
-   * Use this for matching — retains full sparse signal.
-   */
+  // all active features in `enc` that have a label, sorted by activation desc.
+  // use this for matching — retains full sparse signal.
   pickAllLabeled(enc: SparseEncoding): LabeledFeatures {
     return this._pick(enc, Number.POSITIVE_INFINITY);
   }
 
-  /**
-   * Top-4 labeled active features, sorted by activation desc.
-   * Use this for the display payload on CandidateEdge.
-   */
+  // top-4 labeled active features, sorted by activation desc.
+  // use this for the display payload on CandidateEdge.
   pickTop4Labeled(enc: SparseEncoding): LabeledFeatures {
     return this._pick(enc, 4);
   }
