@@ -1,17 +1,13 @@
-/**
- * Shared EmbeddingGemma detection and pooling math (runtime iframe, Node scripts, tests).
- * Keep the iframe Gemma embedder logic numerically aligned with these functions.
- */
+// shared EmbeddingGemma detection and pooling math (runtime iframe, Node scripts, tests).
+// keep the iframe Gemma embedder logic numerically aligned with these functions.
 
-/** Case-insensitive: model id contains "gemma" (matches embed-corpus / embed-vocab routing). */
+//  Case-insensitive: model id contains "gemma" (matches embed-corpus / embed-vocab routing).
 export function isEmbeddingGemmaModelId(modelId: string): boolean {
   return modelId.toLowerCase().includes("gemma");
 }
 
-/**
- * Mean pool over sequence positions, then L2-normalize (last_hidden_state layout:
- * row-major [seqLen, hiddenDim]).
- */
+// mean pool over sequence positions, then L2-normalize (last_hidden_state layout:
+// row-major [seqLen, hiddenDim]).
 export function meanPoolNormalizeL2FromLastHidden(
   data: Float32Array,
   seqLen: number,
@@ -41,10 +37,8 @@ function attentionMaskValue(mask: ArrayBufferView, index: number): number {
   return (mask as Float32Array | Int32Array | Uint8Array)[index] as number;
 }
 
-/**
- * Mean-pool over non-padding positions (attention mask), then L2-normalize per row.
- * `data` is row-major last_hidden_state [batch, seqLen, hiddenDim].
- */
+// mean-pool over non-padding positions (attention mask), then L2-normalize per row.
+// `data` is row-major last_hidden_state [batch, seqLen, hiddenDim].
 export function meanPoolNormalizeL2BatchedFromLastHidden(
   data: Float32Array,
   batch: number,

@@ -1,18 +1,16 @@
-/**
- * K-sparse SAE trainer built on @tensorflow/tfjs-node.
- *
- * Training only. The runtime plugin bundle does NOT import this file - keep it
- * out of any module graph reachable from src/main.ts. Adam + autograd come from
- * TF.js; TopK is natively differentiable (gradient flows only through the
- * selected positions, giving the straight-through semantics the article
- * describes).
- *
- * Matrix shape convention (matches runtime SparseAutoencoder row-major layout):
- *   wEnc: [dHidden, dModel]   (use matMul(x, wEnc, false, true) for forward)
- *   wDec: [dModel,  dHidden]  (use matMul(z, wDec, false, true) for decode)
- *   b_pre / b_dec: [dModel]
- *   b_enc:         [dHidden]
- */
+// k-sparse SAE trainer built on @tensorflow/tfjs-node.
+//
+// training only. The runtime plugin bundle does NOT import this file - keep it
+// out of any module graph reachable from src/main.ts. Adam + autograd come from
+// TF.js; TopK is natively differentiable (gradient flows only through the
+// selected positions, giving the straight-through semantics the article
+// describes).
+//
+// matrix shape convention (matches runtime SparseAutoencoder row-major layout):
+//   wEnc: [dHidden, dModel]   (use matMul(x, wEnc, false, true) for forward)
+//   wDec: [dModel,  dHidden]  (use matMul(z, wDec, false, true) for decode)
+//   b_pre / b_dec: [dModel]
+//   b_enc:         [dHidden]
 
 import "./tf-shim";
 import * as tf from "@tensorflow/tfjs-node";
@@ -26,9 +24,9 @@ export interface SAETrainerOptions {
 }
 
 export interface TrainStepResult {
-  /** Mean-squared reconstruction error for the batch. */
+  //  Mean-squared reconstruction error for the batch.
   reconLoss: number;
-  /** Average L0 (non-zero count per sample). Should be exactly k after training. */
+  //  Average L0 (non-zero count per sample). Should be exactly k after training.
   l0: number;
 }
 
@@ -52,9 +50,9 @@ export class SAETrainer {
 
   private optimizer: tf.AdamOptimizer;
 
-  /** Per-feature lifetime fire count. Used to detect dead features. */
+  //  Per-feature lifetime fire count. Used to detect dead features.
   private featureFireCount: Int32Array;
-  /** Samples processed since fire-count reset. */
+  //  Samples processed since fire-count reset.
   private samplesSinceReset: number;
 
   constructor(initial: SparseAutoencoder, opts: SAETrainerOptions = {}) {
@@ -87,7 +85,7 @@ export class SAETrainer {
     this.samplesSinceReset = 0;
   }
 
-  /** Set the pre-bias to a precomputed sample mean (standard SAE warm-start). */
+  //  Set the pre-bias to a precomputed sample mean (standard SAE warm-start).
   setPreBias(mean: Float32Array): void {
     if (mean.length !== this.dModel) {
       throw new Error(`setPreBias: length ${mean.length} != dModel ${this.dModel}`);
@@ -97,18 +95,16 @@ export class SAETrainer {
     });
   }
 
-  /**
-   * Compute the top-k binary mask for a features tensor using CPU-side topk,
-   * returning a fresh tensor detached from the gradient tape. Used to
-   * implement straight-through TopK: gradient flows through `features` only
-   * at the k selected positions, zero elsewhere, because `mask` is a leaf
-   * tensor (no backward ancestry) and `features * mask`'s gradient w.r.t.
-   * features equals `mask * dy`.
-   *
-   * We do the topk on CPU rather than via tf.topk because tf.topk has no
-   * registered gradient function in TF.js and even customGrad-wrapping the
-   * oneHot+sum path hits a kernel type error on tfjs-node.
-   */
+  // compute the top-k binary mask for a features tensor using CPU-side topk,
+  // returning a fresh tensor detached from the gradient tape. Used to
+  // implement straight-through TopK: gradient flows through `features` only
+  // at the k selected positions, zero elsewhere, because `mask` is a leaf
+  // tensor (no backward ancestry) and `features * mask`'s gradient w.r.t.
+  // features equals `mask * dy`.
+  //
+  // we do the topk on CPU rather than via tf.topk because tf.topk has no
+  // registered gradient function in TF.js and even customGrad-wrapping the
+  // oneHot+sum path hits a kernel type error on tfjs-node.
   private computeTopKMask(features: tf.Tensor2D): tf.Tensor2D {
     const [B, D] = features.shape;
     const flat = features.dataSync() as Float32Array;
@@ -125,13 +121,11 @@ export class SAETrainer {
     return tf.tensor2d(mask, [B, D]);
   }
 
-  /**
-   * K-sparse forward: z = TopK(ReLU(W_enc (x - b_pre) + b_enc), k),
-   * x̂ = W_dec z + b_dec + b_pre.
-   *
-   * Straight-through TopK: `mask` is a detached leaf tensor, so backprop
-   * flows through `features` exactly at the k selected indices.
-   */
+  // k-sparse forward: z = TopK(ReLU(W_enc (x - b_pre) + b_enc), k),
+  // x̂ = W_dec z + b_dec + b_pre.
+  //
+  // straight-through TopK: `mask` is a detached leaf tensor, so backprop
+  // flows through `features` exactly at the k selected indices.
   private kSparseForward(batch: tf.Tensor2D): { sparse: tf.Tensor2D; recon: tf.Tensor2D } {
     const centered = tf.sub(batch, this.bPre);
     const preRelu = tf.add(tf.matMul(centered, this.wEnc, false, true), this.bEnc);
@@ -146,7 +140,7 @@ export class SAETrainer {
     return { sparse, recon };
   }
 
-  /** Single gradient step on one batch. Updates variables in place. */
+  //  Single gradient step on one batch. Updates variables in place.
   trainStep(batch: tf.Tensor2D): TrainStepResult {
     if (batch.shape[1] !== this.dModel) {
       throw new Error(`batch dim ${batch.shape[1]} != dModel ${this.dModel}`);
@@ -165,7 +159,7 @@ export class SAETrainer {
     const reconLoss = (cost.dataSync() as Float32Array)[0];
     cost.dispose();
 
-    // Metrics pass (no-grad). We reuse the same CPU top-k path as the forward
+    // metrics pass (no-grad). We reuse the same CPU top-k path as the forward
     // to track L0 (should equal k unless features degenerate to all-zeros for
     // some rows) and per-feature fire counts for dead-feature monitoring.
     const featuresArr = tf.tidy(() => {
@@ -182,11 +176,9 @@ export class SAETrainer {
     return { reconLoss, l0 };
   }
 
-  /**
-   * Given a flat features buffer [B, dHidden] from a training step, compute
-   * mean L0 (non-zero count among top-k per row) and per-feature fire counts.
-   * All CPU, avoids round-tripping through tfjs-node's topk/onehot kernels.
-   */
+  // given a flat features buffer [B, dHidden] from a training step, compute
+  // mean L0 (non-zero count among top-k per row) and per-feature fire counts.
+  // all CPU, avoids round-tripping through tfjs-node's topk/onehot kernels.
   private cpuL0AndFires(
     featuresFlat: Float32Array,
     batchSize: number,
@@ -210,7 +202,7 @@ export class SAETrainer {
     return { l0: activeTotal / batchSize, fires };
   }
 
-  /** Pure forward pass; returns MSE without touching gradients or variables. */
+  //  Pure forward pass; returns MSE without touching gradients or variables.
   evaluate(batch: tf.Tensor2D): number {
     return tf.tidy(() => {
       const { recon } = this.kSparseForward(batch);
@@ -219,10 +211,8 @@ export class SAETrainer {
     });
   }
 
-  /**
-   * Project each dictionary atom (decoder column) to unit L2 norm.
-   * Call periodically during training and once at the end.
-   */
+  // project each dictionary atom (decoder column) to unit L2 norm.
+  // call periodically during training and once at the end.
   normalizeDecoder(): void {
     tf.tidy(() => {
       const norms = tf.norm(this.wDec, 2, 0); // [dHidden]
@@ -232,7 +222,7 @@ export class SAETrainer {
     });
   }
 
-  /** Mean L2 norm of decoder columns (expected ~1.0 after training). */
+  //  Mean L2 norm of decoder columns (expected ~1.0 after training).
   meanDecoderColNorm(): number {
     return tf.tidy(() => {
       const norms = tf.norm(this.wDec, 2, 0); // [dHidden]
@@ -240,7 +230,7 @@ export class SAETrainer {
     });
   }
 
-  /** Number of features that have never fired since the last reset. */
+  //  Number of features that have never fired since the last reset.
   deadFeatureCount(): number {
     let dead = 0;
     for (let i = 0; i < this.dHidden; i++) {
@@ -254,10 +244,8 @@ export class SAETrainer {
     this.samplesSinceReset = 0;
   }
 
-  /**
-   * Snapshot current TF variable state into a runtime-compatible
-   * SparseAutoencoder (pure Float32 math, no TF.js dependency).
-   */
+  // snapshot current TF variable state into a runtime-compatible
+  // sparseAutoencoder (pure Float32 math, no TF.js dependency).
   exportSAE(): SparseAutoencoder {
     return new SparseAutoencoder({
       dModel: this.dModel,
@@ -280,11 +268,9 @@ export class SAETrainer {
   }
 }
 
-/**
- * In-place min-heap top-k over a contiguous row inside a flat Float32Array.
- * Fills valBuf/idxBuf (length k, unsorted) with the k largest values and
- * their local (within-row) indices.
- */
+// in-place min-heap top-k over a contiguous row inside a flat Float32Array.
+// fills valBuf/idxBuf (length k, unsorted) with the k largest values and
+// their local (within-row) indices.
 function partialTopK(
   flat: Float32Array,
   rowOffset: number,

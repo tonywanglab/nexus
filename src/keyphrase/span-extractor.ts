@@ -4,13 +4,11 @@ import { STOPWORDS } from "./stopwords";
 import { normalizeScores } from "./scoring";
 import { makeYielder } from "../resolver/shared-utils";
 
-/**
- * Configuration for the span-based keyphrase extractor.
- */
+// configuration for the span-based keyphrase extractor.
 export interface SpanExtractorOptions {
-  /** Maximum n-gram window size in tokens/words (default 10). */
+  //  Maximum n-gram window size in tokens/words (default 10).
   maxNgramSize?: number;
-  /** Maximum number of phrases to return (default Infinity). */
+  //  Maximum number of phrases to return (default Infinity).
   topN?: number;
 }
 
@@ -19,14 +17,12 @@ const DEFAULTS: Required<SpanExtractorOptions> = {
   topN: Infinity,
 };
 
-/**
- * High-recall span-based candidate generator.
- *
- * Generates all contiguous token windows (1..maxNgramSize) per sentence,
- * applies minimal filtering (stopword tail, single-char unigrams), deduplicates
- * by phrase text, and assigns a flat score of 0.  Vault-title scan catches
- * titles that span sentence boundaries or exceed the token window.
- */
+// high-recall span-based candidate generator.
+//
+// generates all contiguous token windows (1..maxNgramSize) per sentence,
+// applies minimal filtering (stopword tail, single-char unigrams), deduplicates
+// by phrase text, and assigns a flat score of 0.  Vault-title scan catches
+// titles that span sentence boundaries or exceed the token window.
 export class SpanExtractor {
   private opts: Required<SpanExtractorOptions>;
 
@@ -40,11 +36,11 @@ export class SpanExtractor {
     const { sentences, stripped, offsetMap } = preprocess(content);
     if (sentences.length === 0) return [];
 
-    // Case-insensitive dedup map: lowered phrase → ExtractedPhrase (first occurrence wins)
+    // case-insensitive dedup map: lowered phrase → ExtractedPhrase (first occurrence wins)
     const seen = new Map<string, ExtractedPhrase>();
 
     // ── 1. Generate all contiguous token windows per sentence.
-    // Time-budget yielder keeps the UI responsive on large documents. ──
+    // time-budget yielder keeps the UI responsive on large documents. ──
     const yieldIfNeeded = makeYielder();
     for (const sentence of sentences) {
       await yieldIfNeeded();
@@ -54,16 +50,16 @@ export class SpanExtractor {
         for (let i = 0; i <= tokens.length - n; i++) {
           const gram = tokens.slice(i, i + n);
 
-          // Skip if last token is a stopword
+          // skip if last token is a stopword
           if (STOPWORDS.has(gram[gram.length - 1].lower)) continue;
 
-          // Skip single-char unigrams
+          // skip single-char unigrams
           if (n === 1 && gram[0].lower.length <= 1) continue;
 
           const phrase = gram.map((t) => t.original).join(" ");
           const phraseLower = phrase.toLowerCase();
 
-          // Keep first occurrence only
+          // keep first occurrence only
           if (seen.has(phraseLower)) continue;
 
           const startOffset = gram[0].startOffset;
@@ -96,13 +92,11 @@ export class SpanExtractor {
     return normalizeScores(candidates, this.opts.topN);
   }
 
-  /**
-   * Scans stripped text for verbatim occurrences of vault note titles.
-   * Returns one ExtractedPhrase per matched title (first occurrence only),
-   * with score=0 so they rank highly in topN selection. Time-budget yielder
-   * keeps the UI responsive for large vaults (each title is a fresh regex
-   * compile + exec — hundreds of titles can otherwise pin the main thread).
-   */
+  // scans stripped text for verbatim occurrences of vault note titles.
+  // returns one ExtractedPhrase per matched title (first occurrence only),
+  // with score=0 so they rank highly in topN selection. Time-budget yielder
+  // keeps the UI responsive for large vaults (each title is a fresh regex
+  // compile + exec — hundreds of titles can otherwise pin the main thread).
   private async scanVaultTitles(
     stripped: string,
     offsetMap: number[],

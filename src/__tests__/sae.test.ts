@@ -32,7 +32,7 @@ describe("topK", () => {
     const v = new Float32Array([3, 1, 4, 1]);
     const { indices, values } = topK(v, 4);
     expect(indices.length).toBe(4);
-    // Values+indices should cover every element
+    // values+indices should cover every element
     const seen = new Set<number>();
     for (let i = 0; i < 4; i++) {
       seen.add(indices[i]);
@@ -87,14 +87,14 @@ describe("SparseAutoencoder.encode", () => {
 
   it("produces exactly k non-zeros for positive inputs", () => {
     const w = makeTrivialWeights(dModel, dHidden, k);
-    // Set wEnc so each hidden unit just reads one input dim with known weight
+    // set wEnc so each hidden unit just reads one input dim with known weight
     // wEnc[i * dModel + j] = identity-ish + some distinguishing signal
     for (let i = 0; i < dHidden; i++) {
       for (let j = 0; j < dModel; j++) {
         w.wEnc[i * dModel + j] = i === j ? 1 : 0;
       }
     }
-    // So output[i] = ReLU(x[i]) for i < dModel, else ReLU(0)
+    // so output[i] = ReLU(x[i]) for i < dModel, else ReLU(0)
     const sae = new SparseAutoencoder(w);
 
     const x = new Float32Array([5, 3, 1, 2]);
@@ -102,7 +102,7 @@ describe("SparseAutoencoder.encode", () => {
     let nonzero = 0;
     for (let i = 0; i < sparse.length; i++) if (sparse[i] !== 0) nonzero++;
     expect(nonzero).toBe(k);
-    // The top-2 should be indices 0 and 1 (values 5 and 3).
+    // the top-2 should be indices 0 and 1 (values 5 and 3).
     expect(sparse[0]).toBe(5);
     expect(sparse[1]).toBe(3);
   });
@@ -125,7 +125,7 @@ describe("SparseAutoencoder.encode", () => {
     for (let i = 0; i < dense.length; i++) if (dense[i] !== 0) nonzeroInDense++;
     expect(nonzeroInDense).toBe(4);
 
-    // Every (index, value) from compact should match dense[index]
+    // every (index, value) from compact should match dense[index]
     for (let t = 0; t < compact.indices.length; t++) {
       expect(dense[compact.indices[t]]).toBeCloseTo(compact.values[t], 6);
     }
@@ -238,7 +238,7 @@ describe("topNOf", () => {
     const enc = makeEncoding([[5, 9], [2, 3], [7, 6], [1, 1]]);
     const result = topNOf(enc, 2);
     expect(result.indices.length).toBe(2);
-    // Top 2 by value: index 5 (val 9) and index 7 (val 6)
+    // top 2 by value: index 5 (val 9) and index 7 (val 6)
     const pairs = Array.from(result.indices).map((idx, i) => ({ idx, val: result.values[i] }));
     pairs.sort((a, b) => b.val - a.val);
     expect(pairs[0].val).toBe(9);

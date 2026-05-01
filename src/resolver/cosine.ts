@@ -1,7 +1,5 @@
-/**
- * Cosine similarity between two vectors.
- * Returns a value in [-1, 1]; 1 = identical direction.
- */
+// cosine similarity between two vectors.
+// returns a value in [-1, 1]; 1 = identical direction.
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) {
     throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);

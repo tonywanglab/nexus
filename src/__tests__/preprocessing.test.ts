@@ -124,7 +124,7 @@ describe("preprocess (full pipeline)", () => {
 
     expect(sentences.length).toBeGreaterThan(0);
 
-    // All tokens should have valid offsets into the original content
+    // all tokens should have valid offsets into the original content
     for (const sentence of sentences) {
       for (const token of sentence.tokens) {
         expect(token.startOffset).toBeGreaterThanOrEqual(0);
@@ -142,7 +142,7 @@ describe("preprocess (full pipeline)", () => {
     const allTokens = sentences.flatMap((s) => s.tokens);
     const conceptToken = allTokens.find((t) => t.lower === "concept");
     expect(conceptToken).toBeDefined();
-    // The word "Concept" in original starts at index 6 (inside [[Concept]])
+    // the word "Concept" in original starts at index 6 (inside [[Concept]])
     expect(conceptToken!.startOffset).toBe(6);
   });
 

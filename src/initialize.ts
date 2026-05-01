@@ -3,12 +3,10 @@ import { NoteRegistry } from "./note-registry";
 import { EdgeStore } from "./edge-store";
 import { JobQueue } from "./job-queue";
 
-/**
- * Diffs the current vault state against persisted cache.
- * - Mints ids for files not yet tracked.
- * - Enqueues files whose mtime has changed.
- * - Drops orphaned ids (files no longer in the vault).
- */
+// diffs the current vault state against persisted cache.
+// - Mints ids for files not yet tracked.
+// - Enqueues files whose mtime has changed.
+// - Drops orphaned ids (files no longer in the vault).
 export async function initializeFromCache(
   vault: Vault,
   registry: NoteRegistry,

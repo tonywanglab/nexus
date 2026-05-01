@@ -119,7 +119,7 @@ describe("mergeByTarget", () => {
   });
 
   it("prefers richer sparseFeatures when both dense and sparse-feature edges merge", () => {
-    // Dense resolver attaches only the top 1-2 shared features; the sparse
+    // dense resolver attaches only the top 1-2 shared features; the sparse
     // resolver attaches up to 4 per side. When both fire for the same edge,
     // the richer payload should win on merge.
     const denseSF = {

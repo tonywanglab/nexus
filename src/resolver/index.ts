@@ -6,9 +6,9 @@ import { dedupAndRank, makeYielder } from "./shared-utils";
 export interface ResolverOptions {
   similarityThreshold?: number;
   maxCandidatesPerPhrase?: number;
-  /** Multiplicative boost for exact matches (default 1.5 → sim × 1.5, clamped to 1). */
+  //  Multiplicative boost for exact matches (default 1.5 → sim × 1.5, clamped to 1).
   exactMatchBoost?: number;
-  /** Multiplicative boost when phrase contains the title (default 1.1). */
+  //  Multiplicative boost when phrase contains the title (default 1.1).
   phraseContainsTitleBoost?: number;
 }
 
@@ -19,9 +19,7 @@ const DEFAULTS: Required<ResolverOptions> = {
   phraseContainsTitleBoost: 1.1,
 };
 
-/**
- * Maps extracted keyphrases to existing note titles using deterministic LCS string similarity.
- */
+// maps extracted keyphrases to existing note titles using deterministic LCS string similarity.
 export class AliasResolver {
   private opts: Required<ResolverOptions>;
 
@@ -38,7 +36,7 @@ export class AliasResolver {
     const candidates: CandidateEdge[] = [];
     const yieldIfNeeded = makeYielder();
 
-    // Build token inverted index: token → Set<title>
+    // build token inverted index: token → Set<title>
     const tokenToTitles = new Map<string, Set<string>>();
     const normalizedTitleCache = new Map<string, string>();
 
@@ -63,7 +61,7 @@ export class AliasResolver {
       const normalizedPhrase = normalize(phrase.phrase);
       const phraseCandidates: CandidateEdge[] = [];
 
-      // Collect candidate titles that share at least one token with the phrase
+      // collect candidate titles that share at least one token with the phrase
       const candidateTitles = new Set<string>();
       for (const token of normalizedPhrase.split(" ")) {
         const titles = tokenToTitles.get(token);
@@ -76,7 +74,6 @@ export class AliasResolver {
         const normalizedTitle = normalizedTitleCache.get(title) ?? normalize(title);
         const baseSimilarity = normalizedSimilarity(normalizedPhrase, normalizedTitle);
 
-        // Apply multiplicative boosts (strongest match wins)
         let boost = 1;
         if (exactMatch(phrase.phrase, title)) {
           boost = this.opts.exactMatchBoost;
@@ -84,7 +81,6 @@ export class AliasResolver {
           boost = this.opts.phraseContainsTitleBoost;
         }
 
-        // Multiplicative boost clamped to [0, 1]
         const similarity = Math.min(1, baseSimilarity * boost);
 
         if (similarity >= this.opts.similarityThreshold) {
@@ -98,7 +94,6 @@ export class AliasResolver {
         }
       }
 
-      // Sort by similarity descending, take top N
       phraseCandidates.sort((a, b) => b.similarity - a.similarity);
       candidates.push(...phraseCandidates.slice(0, this.opts.maxCandidatesPerPhrase));
     }

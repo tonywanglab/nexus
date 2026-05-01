@@ -39,7 +39,7 @@ describe("initializeFromCache", () => {
       notes: { "id-a": { path: "a.md", mtime: 100 } },
     });
     vault._addFile(makeFile("a.md", 100)); // same mtime
-    // Also store some cached edges so getEdgesForFile would return them
+    // also store some cached edges so getEdgesForFile would return them
     store.setEdgesForFile("id-a", [], 100);
     await initializeFromCache(vault, registry, store, queue);
     jest.advanceTimersByTime(600);
