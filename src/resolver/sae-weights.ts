@@ -1,4 +1,4 @@
-import weights from "../../assets/sae-weights-v2.bin";
+import weights from "../../assets/sae-weights-v3.bin";
 import { SparseAutoencoder } from "./sae";
 
 export function loadBundledSAE(): SparseAutoencoder {
