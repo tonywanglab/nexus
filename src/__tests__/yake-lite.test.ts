@@ -84,13 +84,13 @@ describe("YakeLite", () => {
       const result = yake.extract(content);
       const phrases = result.map((r) => r.phrase.toLowerCase());
 
-      // should find content words
+      // Should find content words
       expect(phrases.some((p) => p.includes("fox") || p.includes("quick") || p.includes("brown"))).toBe(true);
 
-      // should NOT find pure stopwords as phrases
+      // Should NOT find pure stopwords as phrases
       for (const phrase of phrases) {
         const words = phrase.split(" ");
-        // at least one non-stopword in every phrase
+        // At least one non-stopword in every phrase
         expect(words.some((w) => !["the", "a", "an", "is", "are", "and", "or", "over", "very"].includes(w))).toBe(true);
       }
     });
@@ -127,7 +127,7 @@ describe("YakeLite", () => {
       const result = yakeNgram.extract(content);
       const phrases = result.map((r) => r.phrase.toLowerCase());
 
-      // should find at least one multi-word phrase
+      // Should find at least one multi-word phrase
       const hasMultiWord = phrases.some((p) => p.split(" ").length > 1);
       expect(hasMultiWord).toBe(true);
     });
@@ -160,7 +160,7 @@ describe("YakeLite", () => {
       const result1 = yake1.extract(content);
       const result2 = yake2.extract(content);
 
-      // both should produce results; exact scores will differ
+      // Both should produce results; exact scores will differ
       expect(result1.length).toBeGreaterThan(0);
       expect(result2.length).toBeGreaterThan(0);
     });
@@ -185,7 +185,7 @@ Neural networks process [[training data]] to learn patterns.`;
       const result = yake.extract(content);
       expect(result.length).toBeGreaterThan(0);
 
-      // should extract meaningful terms from the content
+      // Should extract meaningful terms from the content
       const phrases = result.map((r) => r.phrase.toLowerCase());
       expect(phrases.some((p) =>
         p.includes("neural") || p.includes("artificial") ||
@@ -219,7 +219,7 @@ Neural networks process [[training data]] to learn patterns.`;
       const verbIdx = phrases.indexOf("visualize");
       expect(quantumIdx).not.toBe(-1);
       expect(verbIdx).not.toBe(-1);
-      // lower index = better rank (lower score)
+      // Lower index = better rank (lower score)
       expect(quantumIdx).toBeLessThan(verbIdx);
     });
 
@@ -237,7 +237,7 @@ Neural networks process [[training data]] to learn patterns.`;
     });
 
     it("terms in **bold** get a boost", () => {
-      // use two terms that would otherwise score similarly: both appear once
+      // Use two terms that would otherwise score similarly: both appear once
       // but the bold one should rank higher
       const content = "The **quantum** field is growing. The banana field is growing.";
       const result = yake.extract(content);
@@ -257,7 +257,7 @@ Neural networks process [[training data]] to learn patterns.`;
 
       const quantumIdx = phrases.indexOf("quantum");
       expect(quantumIdx).not.toBe(-1);
-      // title boost (3) should apply — term should be ranked highly
+      // Title boost (3) should apply — term should be ranked highly
       expect(quantumIdx).toBeLessThanOrEqual(2);
     });
   });
@@ -287,12 +287,12 @@ Neural networks process [[training data]] to learn patterns.`;
       const resultWith = yake.extract(content, vaultContext);
       const resultWithout = yake.extract(content);
 
-      // find "quantum" score in both — TF-IDF should improve its ranking
+      // Find "quantum" score in both — TF-IDF should improve its ranking
       const qWith = resultWith.find((r) => r.phrase.toLowerCase() === "quantum");
       const qWithout = resultWithout.find((r) => r.phrase.toLowerCase() === "quantum");
       expect(qWith).toBeDefined();
       expect(qWithout).toBeDefined();
-      // normalized score should be lower (better) with vault context for a rare term
+      // Normalized score should be lower (better) with vault context for a rare term
       expect(qWith!.score).toBeLessThanOrEqual(qWithout!.score);
     });
 
@@ -327,7 +327,7 @@ Neural networks process [[training data]] to learn patterns.`;
       const qcIdxWith = phrasesW.indexOf("quantum computing");
       const qcIdxWithout = phrasesWO.indexOf("quantum computing");
       expect(qcIdxWith).not.toBe(-1);
-      // note match boost should improve ranking vs without context
+      // Note match boost should improve ranking vs without context
       if (qcIdxWithout !== -1) {
         expect(qcIdxWith).toBeLessThanOrEqual(qcIdxWithout);
       }
@@ -369,7 +369,7 @@ Neural networks process [[training data]] to learn patterns.`;
       // "machine learning" (noun+noun-gerund) should appear
       const mlIdx = phrases.indexOf("machine learning");
       expect(mlIdx).not.toBe(-1);
-      // should be ranked highly
+      // Should be ranked highly
       expect(mlIdx).toBeLessThanOrEqual(3);
     });
 

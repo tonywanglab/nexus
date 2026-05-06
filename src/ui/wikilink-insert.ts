@@ -4,14 +4,16 @@ export interface WikilinkResult {
   reason?: "span-drift" | "already-linked";
 }
 
-// attempts to replace the phrase at [startOffset, endOffset) with a wikilink.
-//
-// guards:
-// - Verifies the span still contains the phrase text (catches drift after edits).
-// - Detects if the span is already inside [[...]] or [text](url) and short-circuits.
-//
-// alias rule: if phrase (case-insensitive) equals targetTitle, use [[Title]].
-// otherwise use [[Title|phrase]].
+/**
+ * Attempts to replace the phrase at [startOffset, endOffset) with a wikilink.
+ *
+ * Guards:
+ * - Verifies the span still contains the phrase text (catches drift after edits).
+ * - Detects if the span is already inside [[...]] or [text](url) and short-circuits.
+ *
+ * Alias rule: if phrase (case-insensitive) equals targetTitle, use [[Title]].
+ * Otherwise use [[Title|phrase]].
+ */
 export function buildWikilinkReplacement(
   content: string,
   phrase: { phrase: string; startOffset: number; endOffset: number },
@@ -31,7 +33,7 @@ export function buildWikilinkReplacement(
   if (start >= 2 && content.slice(start - 2, start) === "[[") {
     return { content, replaced: false, reason: "already-linked" };
   }
-  // also check if ]] follows the span end.
+  // Also check if ]] follows the span end.
   if (content.slice(end, end + 2) === "]]") {
     return { content, replaced: false, reason: "already-linked" };
   }
@@ -40,7 +42,7 @@ export function buildWikilinkReplacement(
   //    The preprocessor keeps "text" and strips [...](...), so the char before
   //    start is "[" and somewhere after end we see "](" before a newline.
   if (start >= 1 && content[start - 1] === "[") {
-    // look forward from end for ]( within the same line.
+    // Look forward from end for ]( within the same line.
     const lineEnd = content.indexOf("\n", end);
     const searchTo = lineEnd === -1 ? content.length : lineEnd;
     const after = content.slice(end, searchTo);

@@ -11,7 +11,7 @@ import { serialize } from "./persistence";
 type Listener = () => void;
 
 const PERSIST_DEBOUNCE_MS = 300;
-// hard ceiling on how long we'll coalesce writes — guarantees persistence
+// Hard ceiling on how long we'll coalesce writes — guarantees persistence
 // progresses during long-running bulk indexing, where per-file completions
 // would otherwise keep resetting the debounce timer indefinitely.
 const PERSIST_MAX_WAIT_MS = 5000;
@@ -40,6 +40,8 @@ export class EdgeStore {
       this.mtimes.set(id, meta.mtime);
     }
   }
+
+  // ── read ─────────────────────────────────────────────────────
 
   getEdgesForFile(sourceId: NoteId): CandidateEdge[] {
     const stored = this.edges.get(sourceId) ?? [];
@@ -79,10 +81,12 @@ export class EdgeStore {
     return !!list && list.length > 0;
   }
 
-  // one-time repair for edges persisted before sourceId/targetId annotation
-  // was fixed. Walks every stored edge and backfills missing ids — sourceId
-  // from the map key the edge lives under, targetId via the provided
-  // basename→id map. Returns the count of edges that were updated.
+  /**
+   * One-time repair for edges persisted before sourceId/targetId annotation
+   * was fixed. Walks every stored edge and backfills missing ids — sourceId
+   * from the map key the edge lives under, targetId via the provided
+   * basename→id map. Returns the count of edges that were updated.
+   */
   repairEdgeIds(basenameToId: Map<string, NoteId>): number {
     let repaired = 0;
     for (const [sourceId, edgeList] of this.edges) {
@@ -111,7 +115,8 @@ export class EdgeStore {
     return repaired;
   }
 
-  //  Commit the final edge list for a file, bumping mtime to mark it as fully processed.
+  // ── write ────────────────────────────────────────────────────
+
   setEdgesForFile(sourceId: NoteId, edges: CandidateEdge[], mtime: number): void {
     const filtered = edges.filter((e) => !this.isDeniedEdge(e) && !this.isApprovedEdge(e));
     this.edges.set(sourceId, filtered);
@@ -120,10 +125,12 @@ export class EdgeStore {
     this.schedulePersist();
   }
 
-  // intermediate write used while a file's pipeline is still running. Stores
-  // edges and notifies listeners but does NOT bump mtime — so if the process
-  // is killed before the final write, the file is still eligible for retry on
-  // next load.
+  /**
+   * Intermediate write used while a file's pipeline is still running. Stores
+   * edges and notifies listeners but does NOT bump mtime — so if the process
+   * is killed before the final write, the file is still eligible for retry on
+   * next load.
+   */
   setInterimEdgesForFile(sourceId: NoteId, edges: CandidateEdge[]): void {
     const filtered = edges.filter((e) => !this.isDeniedEdge(e) && !this.isApprovedEdge(e));
     this.edges.set(sourceId, filtered);
@@ -151,7 +158,6 @@ export class EdgeStore {
     this.schedulePersist();
   }
 
-  //  Record a user denial and remove the edge from the live set.
   denyEdge(sourceId: NoteId, phrase: string, targetId: NoteId): void {
     const key = phraseKey(phrase);
     if (!this.isDenied(sourceId, phrase, targetId)) {
@@ -160,7 +166,6 @@ export class EdgeStore {
     this.removeEdge(sourceId, phrase, targetId);
   }
 
-  //  Record a user approval and remove the edge from the pending set.
   approveEdge(sourceId: NoteId, phrase: string, targetId: NoteId): void {
     const key = phraseKey(phrase);
     if (!this.isApproved(sourceId, phrase, targetId)) {
@@ -183,9 +188,11 @@ export class EdgeStore {
     this.schedulePersist();
   }
 
-  // clears the edge list for a single file without touching the registry or
-  // denials/approvals. Used by the "reindex this note" UI action to force a
-  // clean rebuild (so the subsequent interim det write is visible immediately).
+  /**
+   * Clears the edge list for a single file without touching the registry or
+   * denials/approvals. Used by the "reindex this note" UI action to force a
+   * clean rebuild (so the subsequent interim det write is visible immediately).
+   */
   clearEdgesForFile(sourceId: NoteId): void {
     if (!this.edges.has(sourceId)) return;
     this.edges.delete(sourceId);
@@ -195,8 +202,10 @@ export class EdgeStore {
   }
 
   dropNote(id: NoteId): void {
+    // Remove as source
     this.edges.delete(id);
     this.mtimes.delete(id);
+    // Remove as target from all edge lists
     for (const [srcId, edgeList] of this.edges) {
       const filtered = edgeList.filter((e) => e.targetId !== id);
       if (filtered.length !== edgeList.length) this.edges.set(srcId, filtered);
@@ -205,15 +214,19 @@ export class EdgeStore {
     this.schedulePersist();
   }
 
+  // ── subscriptions ────────────────────────────────────────────
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  //  Triggers a view refresh without changing underlying data.
+  /** Triggers a view refresh without changing underlying data. */
   refreshViews(): void {
     this.notify();
   }
+
+  // ── lifecycle ────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
     if (this.debounceTimer !== null) {
@@ -227,6 +240,8 @@ export class EdgeStore {
     if (this.inFlightPersist) await this.inFlightPersist;
     await this.flush();
   }
+
+  // ── private ──────────────────────────────────────────────────
 
   private isDeniedEdge(e: CandidateEdge): boolean {
     if (!e.sourceId || !e.targetId) return false;
@@ -252,7 +267,7 @@ export class EdgeStore {
       }
       void this.flush();
     }, PERSIST_DEBOUNCE_MS);
-    // arm the max-wait timer only on the first write of a debounce window, so
+    // Arm the max-wait timer only on the first write of a debounce window, so
     // continuous writes can't keep pushing persistence past this ceiling.
     if (this.maxWaitTimer === null) {
       this.maxWaitTimer = setTimeout(() => {

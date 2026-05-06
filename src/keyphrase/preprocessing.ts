@@ -1,41 +1,46 @@
-// obsidian-aware preprocessing for YAKE-lite.
-//
-// strips markdown/wiki syntax while tracking character offsets so
-// extracted phrases can be mapped back to the original content.
+/**
+ * Obsidian-aware preprocessing for YAKE-lite.
+ *
+ * Strips markdown/wiki syntax while tracking character offsets so
+ * extracted phrases can be mapped back to the original content.
+ */
 
-//  A token with its position in the original (pre-stripped) content.
+/** A token with its position in the original (pre-stripped) content. */
 export interface Token {
-  //  Lowercased form for matching / scoring.
+  /** Lowercased form for matching / scoring. */
   lower: string;
-  //  Original form (preserves case for the Casing feature).
+  /** Original form (preserves case for the Casing feature). */
   original: string;
-  //  Character offset in the original content.
+  /** Character offset in the original content. */
   startOffset: number;
-  //  Character offset (exclusive) in the original content.
+  /** Character offset (exclusive) in the original content. */
   endOffset: number;
-  //  Structural importance: 0 = body, 1 = bold, 2 = heading, 3 = title.
+  /** Structural importance: 0 = body, 1 = bold, 2 = heading, 3 = title. */
   structuralBoost: number;
 }
 
-//  A character range in the original content carrying a structural boost.
+/** A character range in the original content carrying a structural boost. */
 export interface StructuralRange {
   start: number;
   end: number;
   boost: number;
 }
 
-//  A sentence is a list of tokens plus its index (0-based).
+/** A sentence is a list of tokens plus its index (0-based). */
 export interface Sentence {
   index: number;
   tokens: Token[];
 }
 
+// ── Structural detection ─────────────────────────────────────
 
-// scans original markdown content and returns character ranges that
-// carry structural importance boosts:
-// - First `# ` heading (title) → boost 3
-// - `##`+ headings → boost 2
-// - `**…**` bold spans → boost 1
+/**
+ * Scans original markdown content and returns character ranges that
+ * carry structural importance boosts:
+ * - First `# ` heading (title) → boost 3
+ * - `##`+ headings → boost 2
+ * - `**…**` bold spans → boost 1
+ */
 export function detectStructuralRanges(content: string): StructuralRange[] {
   const ranges: StructuralRange[] = [];
   let seenTitle = false;
@@ -46,7 +51,7 @@ export function detectStructuralRanges(content: string): StructuralRange[] {
   for (const line of lines) {
     const lineEnd = offset + line.length;
 
-    // heading detection
+    // Heading detection
     const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (headingMatch) {
       const level = headingMatch[1].length;
@@ -60,7 +65,7 @@ export function detectStructuralRanges(content: string): StructuralRange[] {
       }
     }
 
-    // bold detection within the line
+    // Bold detection within the line
     const boldRe = /\*\*(.+?)\*\*/g;
     let boldMatch: RegExpExecArray | null;
     while ((boldMatch = boldRe.exec(line)) !== null) {
@@ -75,7 +80,9 @@ export function detectStructuralRanges(content: string): StructuralRange[] {
   return ranges;
 }
 
-// returns the maximum structural boost for a character range in the original content.
+/**
+ * Returns the maximum structural boost for a character range in the original content.
+ */
 export function getBoostForRange(
   start: number,
   end: number,
@@ -90,26 +97,29 @@ export function getBoostForRange(
   return maxBoost;
 }
 
+// ── Stripping ────────────────────────────────────────────────
 
-// strips Obsidian / Markdown syntax from content.
-// returns a character-level mapping so offsets in the stripped text
-// can be converted back to offsets in the original.
-//
-// what gets stripped:
-// - YAML frontmatter (`---…---` at the top)
-// - Wikilinks `[[target|display]]` → keeps display text (or target if no alias)
-// - Markdown links `[text](url)` → keeps text
-// - Images `![alt](url)` → removed entirely
-// - Code blocks (fenced ``` and inline `)
-// - Bold / italic markers (`**`, `*`, `__`, `_`)
-// - Heading markers (`# `)
-// - URLs (bare http/https)
-// - HTML tags
+/**
+ * Strips Obsidian / Markdown syntax from content.
+ * Returns a character-level mapping so offsets in the stripped text
+ * can be converted back to offsets in the original.
+ *
+ * What gets stripped:
+ * - YAML frontmatter (`---…---` at the top)
+ * - Wikilinks `[[target|display]]` → keeps display text (or target if no alias)
+ * - Markdown links `[text](url)` → keeps text
+ * - Images `![alt](url)` → removed entirely
+ * - Code blocks (fenced ``` and inline `)
+ * - Bold / italic markers (`**`, `*`, `__`, `_`)
+ * - Heading markers (`# `)
+ * - URLs (bare http/https)
+ * - HTML tags
+ */
 export function stripMarkdown(content: string): { stripped: string; offsetMap: number[] } {
   const offsetMap: number[] = [];
   let stripped = "";
 
-  // each replacement returns the text to keep and the offset within the
+  // Each replacement returns the text to keep and the offset within the
   // full match where that kept text starts (so offset mapping is accurate).
   const replacements: Array<{
     anchored: RegExp;
@@ -117,46 +127,46 @@ export function stripMarkdown(content: string): { stripped: string; offsetMap: n
   }> = [
     // YAML frontmatter (only at very start)
     { anchored: /^(?:^---\n[\s\S]*?\n---\n?)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // fenced code blocks
+    // Fenced code blocks
     { anchored: /^(?:^```[\s\S]*?```)/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // inline code
+    // Inline code
     { anchored: /^(?:`[^`\n]+`)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // images
+    // Images
     { anchored: /^(?:!\[[^\]]*\]\([^)]*\))/, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // wikilinks with alias [[target|display]]
+    // Wikilinks with alias [[target|display]]
     {
       anchored: /^(?:\[\[([^\]|]+)\|([^\]]+)\]\])/,
       replace: (m) => ({ text: m[2], offsetInMatch: m[0].indexOf(m[2]) }),
     },
-    // wikilinks plain [[target]]
+    // Wikilinks plain [[target]]
     {
       anchored: /^(?:\[\[([^\]]+)\]\])/,
       replace: (m) => ({ text: m[1], offsetInMatch: 2 }), // skip [[
     },
-    // markdown links [text](url)
+    // Markdown links [text](url)
     {
       anchored: /^(?:\[([^\]]*)\]\([^)]*\))/,
       replace: (m) => ({ text: m[1], offsetInMatch: 1 }), // skip [
     },
     // HTML tags
     { anchored: /^(?:<[^>]+>)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // bare URLs
+    // Bare URLs
     { anchored: /^(?:https?:\/\/[^\s)]+)/, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // heading markers (start of line)
+    // Heading markers (start of line)
     { anchored: /^(?:#{1,6}\s)/m, replace: () => ({ text: "", offsetInMatch: 0 }) },
-    // bold/italic markers
+    // Bold/italic markers
     { anchored: /^(?:\*{1,3}|_{1,2})/, replace: () => ({ text: "", offsetInMatch: 0 }) },
   ];
 
   let i = 0;
   outer: while (i < content.length) {
-    // try each pattern at the current position
+    // Try each pattern at the current position
     const remaining = content.slice(i);
     for (const { anchored, replace } of replacements) {
       const m = remaining.match(anchored);
       if (m && m.index === 0) {
         const { text: replacementText, offsetInMatch } = replace(m);
-        // map each character of the replacement to its original offset
+        // Map each character of the replacement to its original offset
         for (let j = 0; j < replacementText.length; j++) {
           offsetMap.push(i + offsetInMatch + j);
           stripped += replacementText[j];
@@ -165,7 +175,7 @@ export function stripMarkdown(content: string): { stripped: string; offsetMap: n
         continue outer;
       }
     }
-    // no pattern matched — keep the character
+    // No pattern matched — keep the character
     offsetMap.push(i);
     stripped += content[i];
     i++;
@@ -174,17 +184,20 @@ export function stripMarkdown(content: string): { stripped: string; offsetMap: n
   return { stripped, offsetMap };
 }
 
+// ── Sentence splitting ───────────────────────────────────────
 
-// splits stripped text into sentences.
-//
-// boundaries:
-// - `.` `!` `?` followed by whitespace or end of string
-// - Double newlines (`\n\n`)
+/**
+ * Splits stripped text into sentences.
+ *
+ * Boundaries:
+ * - `.` `!` `?` followed by whitespace or end of string
+ * - Double newlines (`\n\n`)
+ */
 export function splitSentences(text: string): Array<{ start: number; end: number }> {
   const boundaries: Array<{ start: number; end: number }> = [];
   let sentenceStart = 0;
 
-  // skip leading whitespace
+  // Skip leading whitespace
   while (sentenceStart < text.length && /\s/.test(text[sentenceStart])) {
     sentenceStart++;
   }
@@ -192,12 +205,12 @@ export function splitSentences(text: string): Array<{ start: number; end: number
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
 
-    // double newline boundary
+    // Double newline boundary
     if (ch === "\n" && i + 1 < text.length && text[i + 1] === "\n") {
       if (i > sentenceStart) {
         boundaries.push({ start: sentenceStart, end: i });
       }
-      // skip all contiguous newlines/whitespace
+      // Skip all contiguous newlines/whitespace
       i += 2;
       while (i < text.length && /\s/.test(text[i])) i++;
       sentenceStart = i;
@@ -205,22 +218,22 @@ export function splitSentences(text: string): Array<{ start: number; end: number
       continue;
     }
 
-    // sentence-ending punctuation followed by whitespace or end
+    // Sentence-ending punctuation followed by whitespace or end
     if ((ch === "." || ch === "!" || ch === "?") &&
         (i + 1 >= text.length || /\s/.test(text[i + 1]))) {
       if (i >= sentenceStart) {
         boundaries.push({ start: sentenceStart, end: i + 1 });
       }
-      // skip whitespace to find next sentence start
+      // Skip whitespace to find next sentence start
       let next = i + 1;
       while (next < text.length && /\s/.test(text[next])) next++;
       sentenceStart = next;
     }
   }
 
-  // remaining text is a sentence
+  // Remaining text is a sentence
   if (sentenceStart < text.length) {
-    // trim trailing whitespace
+    // Trim trailing whitespace
     let end = text.length;
     while (end > sentenceStart && /\s/.test(text[end - 1])) end--;
     if (end > sentenceStart) {
@@ -231,13 +244,16 @@ export function splitSentences(text: string): Array<{ start: number; end: number
   return boundaries;
 }
 
+// ── Tokenization ─────────────────────────────────────────────
 
-// tokenizes a sentence span into words.
-// splits on whitespace and punctuation boundaries.
-// each token retains its offset into the stripped text.
+/**
+ * Tokenizes a sentence span into words.
+ * Splits on whitespace and punctuation boundaries.
+ * Each token retains its offset into the stripped text.
+ */
 export function tokenize(text: string, spanStart: number): Token[] {
   const tokens: Token[] = [];
-  // match sequences of word characters (letters, digits, apostrophes within words)
+  // Match sequences of word characters (letters, digits, apostrophes within words)
   const wordRe = /[a-zA-Z0-9]+(?:['\u2019][a-zA-Z]+)*/g;
   let m: RegExpExecArray | null;
   while ((m = wordRe.exec(text)) !== null) {
@@ -252,12 +268,15 @@ export function tokenize(text: string, spanStart: number): Token[] {
   return tokens;
 }
 
+// ── Full pipeline ────────────────────────────────────────────
 
-// runs the full preprocessing pipeline:
-// strip markdown → split sentences → tokenize.
-//
-// returns sentences with tokens whose offsets point into the
-// **original** (pre-stripped) content.
+/**
+ * Runs the full preprocessing pipeline:
+ * strip markdown → split sentences → tokenize.
+ *
+ * Returns sentences with tokens whose offsets point into the
+ * **original** (pre-stripped) content.
+ */
 export function preprocess(content: string): {
   sentences: Sentence[];
   offsetMap: number[];
@@ -272,7 +291,7 @@ export function preprocess(content: string): {
     const sentenceText = stripped.slice(span.start, span.end);
     const rawTokens = tokenize(sentenceText, span.start);
 
-    // remap offsets from stripped-space to original-space
+    // Remap offsets from stripped-space to original-space
     const tokens: Token[] = rawTokens.map((t) => {
       const origStart = offsetMap[t.startOffset] ?? t.startOffset;
       const origEnd = offsetMap[t.endOffset - 1] !== undefined

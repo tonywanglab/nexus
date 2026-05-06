@@ -1,13 +1,15 @@
-// precision/Recall evaluation framework for the Nexus link discovery pipeline.
-//
-// uses existing wikilinks in the senior-thesis-vault as ground truth:
-// if a user already linked [[Data Warehouse]], the system should discover that link too.
-//
-// for each note:
-// 1. Extract ground truth — parse all [[wikilinks]] from raw markdown
-// 2. Strip wikilinks — so extractors see plain text (no link hints)
-// 3. Run pipeline — extractor → resolver → candidate edges
-// 4. Compare — predicted vs ground truth → TP, FP, FN → precision, recall, F1
+/**
+ * Precision/Recall evaluation framework for the Nexus link discovery pipeline.
+ *
+ * Uses existing wikilinks in the senior-thesis-vault as ground truth:
+ * if a user already linked [[Data Warehouse]], the system should discover that link too.
+ *
+ * For each note:
+ * 1. Extract ground truth — parse all [[wikilinks]] from raw markdown
+ * 2. Strip wikilinks — so extractors see plain text (no link hints)
+ * 3. Run pipeline — extractor → resolver → candidate edges
+ * 4. Compare — predicted vs ground truth → TP, FP, FN → precision, recall, F1
+ */
 
 import * as fs from "fs";
 import * as path from "path";
@@ -37,7 +39,7 @@ interface PerFileResult {
   tpList: string[];
   fpList: string[];
   fnList: string[];
-  //  FN targets that were reached via a display alias (e.g. [[Target|alias]]).
+  /** FN targets that were reached via a display alias (e.g. [[Target|alias]]). */
   fnAliasedList: string[];
 }
 
@@ -79,8 +81,10 @@ function loadVault(vaultDir: string): VaultFile[] {
 
 // ── Ground truth extraction ─────────────────────────────────────
 
-// returns both the ground-truth target set and a set of normalized targets
-// that were reached via an alias (i.e., [[target|display]] where target ≠ display).
+/**
+ * Returns both the ground-truth target set and a set of normalized targets
+ * that were reached via an alias (i.e., [[target|display]] where target ≠ display).
+ */
 function extractGroundTruth(
   content: string,
   sourceBasename: string,
@@ -89,48 +93,48 @@ function extractGroundTruth(
   const aliasedTargets = new Set<string>();
   const normalizedSource = normalize(sourceBasename);
 
-  // strip YAML frontmatter
+  // Strip YAML frontmatter
   let text = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
 
-  // strip fenced code blocks
+  // Strip fenced code blocks
   text = text.replace(/```[\s\S]*?```/g, "");
 
-  // truncate at %% wiki footer
+  // Truncate at %% wiki footer
   const footerIdx = text.indexOf("%% wiki footer");
   if (footerIdx !== -1) {
     text = text.slice(0, footerIdx);
   }
 
-  // parse wikilinks
+  // Parse wikilinks
   const re = /(!?)\[\[([^\]]+)\]\]/g;
   let match: RegExpExecArray | null;
 
   while ((match = re.exec(text)) !== null) {
-    // skip embeds (![[...]])
+    // Skip embeds (![[...]])
     if (match[1] === "!") continue;
 
     const inner = match[2];
 
-    // split on | → take target part (before pipe)
+    // Split on | → take target part (before pipe)
     const pipeIdx = inner.indexOf("|");
     const targetPart = pipeIdx !== -1 ? inner.slice(0, pipeIdx) : inner;
     const displayPart = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : null;
 
-    // split on # → take title part (before hash)
+    // Split on # → take title part (before hash)
     const hashIdx = targetPart.indexOf("#");
     const title = hashIdx !== -1 ? targetPart.slice(0, hashIdx) : targetPart;
 
-    // skip empty titles (heading-only self-links like [[#heading]])
+    // Skip empty titles (heading-only self-links like [[#heading]])
     if (!title.trim()) continue;
 
     const normalizedTarget = normalize(title);
 
-    // skip self-links
+    // Skip self-links
     if (normalizedTarget === normalizedSource) continue;
 
     targets.add(normalizedTarget);
 
-    // track aliased links: [[target|display]] where display differs from target
+    // Track aliased links: [[target|display]] where display differs from target
     if (displayPart !== null && normalize(displayPart) !== normalizedTarget) {
       aliasedTargets.add(normalizedTarget);
     }
@@ -142,11 +146,11 @@ function extractGroundTruth(
 // ── Wikilink stripping ──────────────────────────────────────────
 
 function stripWikilinksForEval(content: string): string {
-  // remove transclusions/embeds entirely
+  // Remove transclusions/embeds entirely
   let text = content.replace(/!\[\[[^\]]*\]\]/g, "");
 
   // [[target|display]] → "display target"
-  // inject the target title so the vault-title scan can find it even when the
+  // Inject the target title so the vault-title scan can find it even when the
   // display text is an abbreviation or alias (e.g. [[Online Analytical Processing|OLAP]]).
   text = text.replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?\|([^\]]+)\]\]/g, "$2 $1");
 
@@ -193,7 +197,7 @@ async function evaluateExtractor(
       }
     }
 
-    // skip files with no valid ground truth
+    // Skip files with no valid ground truth
     if (groundTruth.size === 0) continue;
 
     // 3. Strip wikilinks, run extractor + resolver
@@ -243,7 +247,7 @@ async function evaluateExtractor(
     });
   }
 
-  // aggregate
+  // Aggregate
   const totalTP = perFile.reduce((s, r) => s + r.tp, 0);
   const totalFP = perFile.reduce((s, r) => s + r.fp, 0);
   const totalFN = perFile.reduce((s, r) => s + r.fn, 0);
@@ -277,14 +281,14 @@ describe("Evaluation Framework", () => {
   beforeAll(async () => {
     if (!vaultExists) return;
 
-    // load vault
+    // Load vault
     files = loadVault(VAULT_DIR);
     if (files.length === 0) return;
 
     noteTitles = files.map((f) => f.basename);
     vaultContext = buildVaultContext(files, noteTitles);
 
-    // run SpanExtractor + Deterministic (LCS) resolver
+    // Run SpanExtractor + Deterministic (LCS) resolver
     const spanExtractor = new SpanExtractor();
     spanResult = await evaluateExtractor(
       "SpanExtractor",

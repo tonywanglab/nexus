@@ -6,7 +6,7 @@ function makeStore(threshold = 0.7) {
   const state: PersistedState = { ...createEmptyPersistedState(), similarityThreshold: threshold };
   const onPersist = jest.fn();
   const store = new EdgeStore(state, onPersist);
-  // add a source file so allSourceIds returns something.
+  // Add a source file so allSourceIds returns something.
   store.setEdgesForFile("id-a", [], 100);
   store.setEdgesForFile("id-b", [], 200);
   return { store, onPersist };
@@ -30,7 +30,7 @@ describe("threshold slider behaviour", () => {
         { sourcePath: "a.md", sourceId: "id-a", phrase, targetPath: "U", targetId: "id-u", similarity: 0.4 },
       ], 100);
       store.setThresholdAndPrune(0.8);
-      // lower to 0 — pruned edges should be gone from storage.
+      // Lower to 0 — pruned edges should be gone from storage.
       store.setThresholdNoPrune(0);
       expect(store.getEdgesForFile("id-a")).toHaveLength(1);
       expect(store.getEdgesForFile("id-a")[0].similarity).toBe(0.9);
@@ -53,7 +53,7 @@ describe("threshold slider behaviour", () => {
         { sourcePath: "a.md", sourceId: "id-a", phrase, targetPath: "T", targetId: "id-t", similarity: 0.95 },
       ], 100);
       store.setThresholdNoPrune(0.5);
-      // edge was stored above old threshold, still present.
+      // Edge was stored above old threshold, still present.
       expect(store.getEdgesForFile("id-a")).toHaveLength(1);
     });
 
@@ -61,19 +61,19 @@ describe("threshold slider behaviour", () => {
       const { store } = makeStore();
       const { queue, onProcess } = makeQueue();
 
-      // first process both files so cooldown would block normal enqueue.
+      // First process both files so cooldown would block normal enqueue.
       queue.enqueue("a.md", "process");
       queue.enqueue("b.md", "process");
       jest.advanceTimersByTime(600);
       expect(onProcess).toHaveBeenCalledTimes(2);
 
-      // simulate lowering threshold — caller must use forceEnqueue.
+      // Simulate lowering threshold — caller must use forceEnqueue.
       store.setThresholdNoPrune(0.3);
       for (const id of store.allSourceIds()) {
         queue.forceEnqueue(id, "process"); // id doubles as path in this test
       }
       jest.advanceTimersByTime(600);
-      // should have processed again despite cooldown.
+      // Should have processed again despite cooldown.
       expect(onProcess).toHaveBeenCalledTimes(4);
     });
   });

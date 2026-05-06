@@ -1,4 +1,6 @@
-// embedding provider interface and implementations for dense vector embeddings.
+/**
+ * Embedding provider interface and implementations for dense vector embeddings.
+ */
 
 import { isEmbeddingGemmaModelId } from "./gemma-embedding";
 
@@ -21,6 +23,7 @@ export type EmbeddingProgressEvent =
 
 export type EmbeddingProgressListener = (ev: EmbeddingProgressEvent) => void;
 
+// ── TransformersIframeProvider ─────────────────────────────────────────
 
 const CDN_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
 const DEFAULT_MODEL = "onnx-community/embeddinggemma-300m-ONNX";
@@ -89,8 +92,10 @@ parent.postMessage({ id: "__ready__", result: true }, "*");
 </${"script"}></body></html>`;
 }
 
-// embeddingGemma: AutoModel + tokenizer + mean pool + L2 (aligned with Node GemmaNodeProvider).
-// iframe source kept in sync with src/resolver/gemma-embedding.ts pooling math.
+/**
+ * EmbeddingGemma: AutoModel + tokenizer + mean pool + L2 (aligned with Node GemmaNodeProvider).
+ * Iframe source kept in sync with src/resolver/gemma-embedding.ts pooling math.
+ */
 function buildGemmaIframeSrcdoc(model: string): string {
   const modelJs = JSON.stringify(model);
   return `<!DOCTYPE html>
@@ -119,7 +124,7 @@ function progressCallback(p) {
 }
 
 function maskVal(maskData, i) {
-  // gemma tokenizer may return BigInt64Array; coerce to number before comparing.
+  // Gemma tokenizer may return BigInt64Array; coerce to number before comparing.
   const v = maskData[i];
   return typeof v === "bigint" ? Number(v) : v;
 }
@@ -129,7 +134,7 @@ function poolMeanNormBatched(embeddings, attentionMask) {
   const batch = dims[0];
   const seqLen = dims[1];
   const hiddenDim = dims[2];
-  const data = embeddings.data;       // float32Array
+  const data = embeddings.data;       // Float32Array
   const maskData = attentionMask.data;
   const results = [];
   for (let b = 0; b < batch; b++) {
@@ -174,7 +179,7 @@ window.addEventListener("message", async (event) => {
   try {
     if (method === "embed_batch") {
       await ensureModel();
-      // tokenize the whole batch at once and run a single forward pass.
+      // Tokenize the whole batch at once and run a single forward pass.
       const inputs = await tokenizer(params.texts, { padding: true, truncation: true });
       const output = await mdl(inputs);
       const results = poolMeanNormBatched(output.last_hidden_state, inputs.attention_mask);
@@ -200,10 +205,12 @@ interface PendingRequest {
   reject: (reason: any) => void;
 }
 
-// two-priority FIFO queue: `high` entries drain before `normal` ones, while
-// preserving FIFO order within a priority. Used to serialize embedding work
-// against the single-threaded iframe pipeline while letting user-facing
-// requests cut ahead of bulk indexing.
+/**
+ * Two-priority FIFO queue: `high` entries drain before `normal` ones, while
+ * preserving FIFO order within a priority. Used to serialize embedding work
+ * against the single-threaded iframe pipeline while letting user-facing
+ * requests cut ahead of bulk indexing.
+ */
 class PriorityQueue<T> {
   private buckets: Record<EmbeddingPriority, T[]> = { high: [], normal: [] };
 
@@ -220,8 +227,10 @@ class PriorityQueue<T> {
   }
 }
 
-// runs @huggingface/transformers inside a hidden iframe for WASM isolation.
-// communication via postMessage with promise-based request/response matching.
+/**
+ * Runs @huggingface/transformers inside a hidden iframe for WASM isolation.
+ * Communication via postMessage with promise-based request/response matching.
+ */
 export class TransformersIframeProvider implements EmbeddingProvider {
   readonly dims: number;
   private iframe: HTMLIFrameElement | null = null;
@@ -232,14 +241,14 @@ export class TransformersIframeProvider implements EmbeddingProvider {
   private model: string;
   private modelLoaded = false;
   private progressListener: EmbeddingProgressListener | null = null;
-  // serialize requests: the ONNX pipeline in the iframe is single-threaded, so
+  // Serialize requests: the ONNX pipeline in the iframe is single-threaded, so
   // concurrent posts just interleave and make per-request timers fire on work
   // that hasn't started yet. `high` drains before `normal` so user-facing work
   // (active file, approve-triggered reprocess) at worst waits for the single
   // batch currently in flight.
   private queue = new PriorityQueue<() => Promise<void>>();
   private draining = false;
-  //  Time to wait for iframe `__ready__` (large Gemma downloads need minutes).
+  /** Time to wait for iframe `__ready__` (large Gemma downloads need minutes). */
   private readonly iframeReadyTimeoutMs: number;
 
   constructor(model: string = DEFAULT_MODEL, dims: number = DEFAULT_DIMS) {
@@ -320,7 +329,7 @@ export class TransformersIframeProvider implements EmbeddingProvider {
     return new Promise<T>((resolve, reject) => {
       const task = () => {
         const id = `emb_${this.nextId++}`;
-        // first request carries the model download; give it much more headroom.
+        // First request carries the model download; give it much more headroom.
         const timeoutMs = this.modelLoaded ? 60_000 : 300_000;
         return new Promise<void>((done) => {
           this.pending.set(id, {

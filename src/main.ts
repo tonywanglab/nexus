@@ -18,9 +18,11 @@ import { NexusSettingsModal } from "./ui/settings-modal";
 import { ProgressToast } from "./ui/progress-toast";
 import { serializeEmbeddings, deserializeEmbeddings } from "./embedding-persistence";
 
-// phrases whose LCS match against some title is this strong or higher can skip
-// dense/sparse embedding — the lexical match alone is decisive enough that the
-// extra compute rarely surfaces new targets worth showing.
+/**
+ * Phrases whose LCS match against some title is this strong or higher can skip
+ * dense/sparse embedding — the lexical match alone is decisive enough that the
+ * extra compute rarely surfaces new targets worth showing.
+ */
 const STRONG_LCS_MATCH = 0.95;
 const MAX_EMBED_PHRASES = 60;
 const TITLE_EMBEDDINGS_FILENAME = "title-embeddings.bin";
@@ -48,7 +50,7 @@ export default class NexusPlugin extends Plugin {
 
     this.noteRegistry = new NoteRegistry(persisted.notes);
     this.edgeStore = new EdgeStore(persisted, async (state) => {
-      // merge current path info from registry into the state before saving.
+      // Merge current path info from registry into the state before saving.
       const noteMap = this.noteRegistry.toNoteMap();
       for (const [id, meta] of Object.entries(noteMap)) {
         if (state.notes[id]) state.notes[id].path = meta.path;
@@ -60,7 +62,7 @@ export default class NexusPlugin extends Plugin {
     this.resolver = new AliasResolver();
     this.embeddingProvider = new TransformersIframeProvider();
     this.wireModelDownloadNotice();
-    // fire-and-forget warmup so the model starts downloading immediately rather
+    // Fire-and-forget warmup so the model starts downloading immediately rather
     // than on the first user-triggered embedding request.
     void this.embeddingProvider.embed("warmup").catch((err) => {
       console.warn("Nexus: embedding warmup failed", err);
@@ -77,12 +79,12 @@ export default class NexusPlugin extends Plugin {
       featureLabels: this.featureLabels,
       onTitleEmbeddingsChanged: () => this.scheduleTitleEmbeddingsSave(),
     });
-    // load persisted title embeddings; if none exist yet, first indexing pass
+    // Load persisted title embeddings; if none exist yet, first indexing pass
     // will populate them. Failures are non-fatal (we'll just re-embed).
     await this.loadTitleEmbeddings();
 
     this.jobQueue = new JobQueue(async (job) => {
-      // yield once before starting heavy work — the debounce timer fires
+      // Yield once before starting heavy work — the debounce timer fires
       // synchronously, so without this the full pipeline runs in the same
       // macrotask and delays the next paint the editor queued for a keystroke.
       await new Promise<void>((r) => setTimeout(r));
@@ -100,7 +102,7 @@ export default class NexusPlugin extends Plugin {
       const content = await this.app.vault.cachedRead(file);
       const allFiles = this.app.vault.getMarkdownFiles() as TFile[];
       const noteTitles = allFiles.map((f) => f.basename);
-      // edges carry `targetPath` as a basename (from `noteTitles`), but the
+      // Edges carry `targetPath` as a basename (from `noteTitles`), but the
       // registry is keyed by full path — so we need a basename→id map to turn
       // them into the stable ids that denial/approval records rely on.
       const basenameToId = new Map<string, string>();
@@ -122,26 +124,28 @@ export default class NexusPlugin extends Plugin {
       const detEdges = await this.resolver.resolve(phrases, noteTitles, job.filePath);
       console.log(`Nexus:   ${detEdges.length} deterministic edge(s)`);
 
+      // Annotate with ids
       const annotated = detEdges.map((e) => ({
         ...e,
         sourceId,
         targetId: basenameToId.get(e.targetPath),
       }));
 
-      // publish deterministic edges immediately so first-pass files don't wait
+      // Publish deterministic edges immediately so first-pass files don't wait
       // on embeddings. Skip this write when the file already has edges — an
       // approve/modify triggers reprocess, and wiping the emb-edge list during
       // the ~60s embedding window makes it look like approving nuked the list.
-      // don't bump mtime either way — if we're killed before embeddings finish,
+      // Don't bump mtime either way — if we're killed before embeddings finish,
       // the file should be reprocessed on next load.
       const detMerged = mergeByTarget(annotated);
       if (!this.edgeStore.hasEdgesFor(sourceId)) {
         this.edgeStore.setInterimEdgesForFile(sourceId, detMerged);
       }
 
-      // skip embedding for phrases with a strong enough LCS match — dense/sparse
-      // rarely surface new targets beyond those, and embedding cost dominates
-      // the pipeline. Weak or unmatched phrases still go through for semantic coverage.
+      // Skip embedding for phrases that already have a near-perfect LCS match —
+      // dense/sparse rarely surface anything new for those, and embedding cost
+      // dominates the pipeline. Phrases with no LCS match or only weak matches
+      // still go through so dense can find semantically related targets.
       const stronglyMatched = new Set<string>();
       for (const e of detEdges) {
         if (e.similarity >= STRONG_LCS_MATCH) stronglyMatched.add(e.phrase.phrase);
@@ -181,7 +185,7 @@ export default class NexusPlugin extends Plugin {
           targetId: basenameToId.get(e.targetPath),
         }));
 
-        // persist det+dense now so the UI reflects dense edges even if sparse is
+        // Persist det+dense now so the UI reflects dense edges even if sparse is
         // still running or gets interrupted. mtime is not bumped — sparse will do
         // the final write with mtime, keeping the file eligible for retry if killed.
         this.edgeStore.setInterimEdgesForFile(
@@ -220,7 +224,7 @@ export default class NexusPlugin extends Plugin {
         );
       } catch (err) {
         console.warn("Nexus: embedding resolver failed:", err);
-        // commit det-only result with mtime so we don't infinite-retry a file
+        // Commit det-only result with mtime so we don't infinite-retry a file
         // whose embeddings keep failing. User can force-reindex from settings.
         this.edgeStore.setEdgesForFile(sourceId, detMerged, file.stat.mtime);
         console.log(
@@ -251,14 +255,14 @@ export default class NexusPlugin extends Plugin {
       }
     });
 
-    // track active file for priority debouncing — only enqueue if mtime has changed.
+    // Track active file for priority debouncing — only enqueue if mtime has changed.
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf: WorkspaceLeaf | null) => {
         const view = leaf?.view as any;
         const file = view?.file;
         const path = file?.path ?? null;
         this.jobQueue.setActiveFile(path);
-        // drop background normal-priority pending jobs so the active file's job
+        // Drop background normal-priority pending jobs so the active file's job
         // cuts ahead rather than waiting behind stale background work.
         if (path) this.jobQueue.cancelNormalExcept(path);
         if (path && typeof path === "string" && path.endsWith(".md")) {
@@ -273,7 +277,7 @@ export default class NexusPlugin extends Plugin {
       })
     );
 
-    // register side panel view.
+    // Register side panel view.
     this.registerView(
       APPROVAL_VIEW_TYPE,
       (leaf) => new NexusApprovalView(leaf, this.edgeStore, this),
@@ -299,14 +303,14 @@ export default class NexusPlugin extends Plugin {
         ).open(),
     });
 
-    // defer vault scan + event subscription until Obsidian finishes its own
+    // Defer vault scan + event subscription until Obsidian finishes its own
     // initial indexing. If we ran `getMarkdownFiles()` straight from `onload`,
     // it returned `[]` before the vault was ready — `reconcile` then dropped
     // every persisted note as an orphan, and Obsidian's backfill `create`
     // events re-queued every file for a cold reprocess. `onLayoutReady` fires
     // after the vault is populated (or immediately if already ready).
     this.app.workspace.onLayoutReady(async () => {
-      // one-time repair: edges persisted before the targetId fix were stored
+      // One-time repair: edges persisted before the targetId fix were stored
       // with targetId=undefined because getId() was being called with a
       // basename instead of a full path. Rebuild the map from the current
       // vault and repopulate missing ids so approve/deny on legacy edges
@@ -322,7 +326,7 @@ export default class NexusPlugin extends Plugin {
         if (repaired > 0) console.log(`Nexus: repaired ids on ${repaired} legacy edge(s)`);
       }
 
-      // drop persisted title embeddings for titles that no longer exist
+      // Drop persisted title embeddings for titles that no longer exist
       // (renames, deletions). Triggers a debounced save if anything changed.
       {
         const activeTitles = new Set(
@@ -345,7 +349,7 @@ export default class NexusPlugin extends Plugin {
         };
       }
 
-      // subscribe AFTER the cache-reconcile pass so Obsidian's startup
+      // Subscribe AFTER the cache-reconcile pass so Obsidian's startup
       // `create` events (fired as it indexed the vault) don't get mistaken
       // for genuine user-initiated creates and re-queue every file.
       this.eventListener.subscribe();

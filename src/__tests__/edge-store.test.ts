@@ -96,7 +96,7 @@ describe("EdgeStore", () => {
         makeEdge("b", "B", 0.5),
       ], 100);
       store.setThresholdAndPrune(0.8);
-      // lower threshold — edges below 0.8 already deleted from storage
+      // Lower threshold — edges below 0.8 already deleted from storage
       store.setThresholdNoPrune(0.3);
       const out = store.getEdgesForFile("id-src");
       expect(out).toHaveLength(1);
@@ -110,7 +110,7 @@ describe("EdgeStore", () => {
         makeEdge("b", "B", 0.5),
       ], 100);
       store.setThresholdNoPrune(0.8);
-      // raw storage still has both edges; getEdgesForFile applies threshold filter
+      // Raw storage still has both edges; getEdgesForFile applies threshold filter
       expect(store.getEdgesForFile("id-src")).toHaveLength(1);
       store.setThresholdNoPrune(0.3);
       expect(store.getEdgesForFile("id-src")).toHaveLength(2);

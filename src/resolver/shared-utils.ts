@@ -1,10 +1,12 @@
 import { CandidateEdge, phraseKey } from "../types";
 
-// time-budget yielder for long synchronous loops. Returns a function that
-// awaits `setTimeout(0)` only when more than `budgetMs` has elapsed since
-// the last yield — so warm-cache loops pay ~nothing while heavy CPU loops
-// break into UI-paintable chunks. `setTimeout` (macrotask) is required;
-// `Promise.resolve()` (microtask) does not let the browser paint.
+/**
+ * Time-budget yielder for long synchronous loops. Returns a function that
+ * awaits `setTimeout(0)` only when more than `budgetMs` has elapsed since
+ * the last yield — so warm-cache loops pay ~nothing while heavy CPU loops
+ * break into UI-paintable chunks. `setTimeout` (macrotask) is required;
+ * `Promise.resolve()` (microtask) does not let the browser paint.
+ */
 export function makeYielder(budgetMs = 16): () => Promise<void> {
   let lastYield = performance.now();
   return async () => {
@@ -15,8 +17,10 @@ export function makeYielder(budgetMs = 16): () => Promise<void> {
   };
 }
 
-// deduplicates candidate edges by (phrase, target) keeping highest similarity,
-// then ranks by combined score: similarity × (1 - phraseScore).
+/**
+ * Deduplicates candidate edges by (phrase, target) keeping highest similarity,
+ * then ranks by combined score: similarity × (1 - phraseScore).
+ */
 export function dedupAndRank(candidates: CandidateEdge[]): CandidateEdge[] {
   const best = new Map<string, CandidateEdge>();
   for (const edge of candidates) {

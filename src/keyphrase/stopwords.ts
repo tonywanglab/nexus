@@ -1,6 +1,8 @@
-// english stopword list (~175 words) for keyphrase filtering.
-// kept intentionally compact — covers determiners, prepositions,
-// pronouns, auxiliaries, and common adverbs.
+/**
+ * English stopword list (~175 words) for keyphrase filtering.
+ * Kept intentionally compact — covers determiners, prepositions,
+ * pronouns, auxiliaries, and common adverbs.
+ */
 export const STOPWORDS: ReadonlySet<string> = new Set([
   // determiners
   "a", "an", "the", "this", "that", "these", "those",

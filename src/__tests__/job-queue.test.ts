@@ -285,16 +285,16 @@ describe("JobQueue", () => {
   describe("integration with event listener pattern", () => {
     it("simulates create → modify → modify debounce cycle", () => {
       const { onProcess, queue } = setup();
-      // file created
+      // File created
       queue.enqueue("new-note.md", "process");
       jest.advanceTimersByTime(100);
-      // user starts typing (modify)
+      // User starts typing (modify)
       queue.enqueue("new-note.md", "process");
       jest.advanceTimersByTime(100);
-      // still typing
+      // Still typing
       queue.enqueue("new-note.md", "process");
       jest.advanceTimersByTime(500);
-      // only one final process fires
+      // Only one final process fires
       expect(onProcess).toHaveBeenCalledTimes(1);
     });
 
@@ -302,7 +302,7 @@ describe("JobQueue", () => {
       const { onProcess, queue } = setup();
       queue.enqueue("old-name.md", "process");
       jest.advanceTimersByTime(100);
-      // rename event: cancel old, enqueue new
+      // Rename event: cancel old, enqueue new
       queue.cancel("old-name.md");
       queue.enqueue("new-name.md", "reindex");
       jest.advanceTimersByTime(500);
@@ -329,7 +329,7 @@ describe("JobQueue", () => {
       queue.enqueue("a.md", "process");
       jest.advanceTimersByTime(600);
       expect(onProcess).toHaveBeenCalledTimes(1);
-      // normal enqueue within cooldown is silently dropped.
+      // Normal enqueue within cooldown is silently dropped.
       queue.enqueue("a.md", "process");
       jest.advanceTimersByTime(600);
       expect(onProcess).toHaveBeenCalledTimes(1);

@@ -4,7 +4,7 @@ import { EdgeStore } from "../edge-store";
 
 export const APPROVAL_VIEW_TYPE = "nexus-approval";
 
-//  Max cards rendered per tab — keeps the panel snappy when a note has many matches.
+/** Max cards rendered per tab — keeps the panel snappy when a note has many matches. */
 
 export interface CardVM {
   edge: CandidateEdge;
@@ -18,8 +18,10 @@ export interface CardVM {
   targetId: NoteId;
 }
 
-// read contributing resolvers from an edge, falling back to legacy `matchType`
-// for edges persisted before `matchedBy` existed.
+/**
+ * Read contributing resolvers from an edge, falling back to legacy `matchType`
+ * for edges persisted before `matchedBy` existed.
+ */
 export function resolversOf(edge: CandidateEdge): Resolver[] {
   if (edge.matchedBy && edge.matchedBy.length > 0) return edge.matchedBy;
   switch (edge.matchType) {
@@ -76,16 +78,18 @@ export function buildCardViewModel(
 
 export type EdgeTab = Resolver;
 
-// predicate for the sidebar tab filter. An edge "belongs to" a tab when the
-// tab's resolver contributed to it — so multi-resolver edges show up under
-// every contributing tab rather than being hidden.
+/**
+ * Predicate for the sidebar tab filter. An edge "belongs to" a tab when the
+ * tab's resolver contributed to it — so multi-resolver edges show up under
+ * every contributing tab rather than being hidden.
+ */
 export function matchesTab(tab: EdgeTab): (e: CandidateEdge) => boolean {
   return (e) => resolversOf(e).includes(tab);
 }
 
 export class NexusApprovalView extends ItemView {
   private store: EdgeStore;
-  private plugin: any; // plugin reference for vault access
+  private plugin: any; // Plugin reference for vault access
   private unsub: (() => void) | null = null;
   private activeFilePath: string | null = null;
   private pendingApprovals = new Map<string, Promise<void>>();
@@ -112,7 +116,7 @@ export class NexusApprovalView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.unsub = this.store.subscribe(() => {
-      // debounce via rAF: batch rapid store writes (e.g. bulk indexing) into a
+      // Debounce via rAF: batch rapid store writes (e.g. bulk indexing) into a
       // single render, keeping the UI responsive during background processing.
       if (this.renderRaf !== null) cancelAnimationFrame(this.renderRaf);
       this.renderRaf = requestAnimationFrame(() => {
@@ -125,7 +129,7 @@ export class NexusApprovalView extends ItemView {
       this.app.workspace.on("active-leaf-change", () => {
         const active = this.app.workspace.getActiveFile();
         this.activeFilePath = active?.path ?? null;
-        // cancel any pending rAF so we render immediately for the new active file.
+        // Cancel any pending rAF so we render immediately for the new active file.
         if (this.renderRaf !== null) {
           cancelAnimationFrame(this.renderRaf);
           this.renderRaf = null;
@@ -267,7 +271,7 @@ export class NexusApprovalView extends ItemView {
     card: any,
     sparseFeatures: NonNullable<CandidateEdge["sparseFeatures"]>,
   ): void {
-    // collapse the phrase/title payloads into the features that fire on both
+    // Collapse the phrase/title payloads into the features that fire on both
     // sides — the interpretable "why these two match" signal. Rank by pVal*tVal
     // (the feature's literal contribution to sparseCosine), and cap at 2 chips.
     const featureLabels = (this.plugin as any).featureLabels;
@@ -284,7 +288,7 @@ export class NexusApprovalView extends ItemView {
     }
     if (shared.length === 0) return;
     shared.sort((a, b) => b.score - a.score);
-    const top = shared.slice(0, 3);
+    const top = shared.slice(0, 2);
 
     const el = card.createEl("div", { cls: "nexus-sparse-features" });
     const chips = el.createEl("div", { cls: "nexus-sparse-chips" });
@@ -308,7 +312,7 @@ export class NexusApprovalView extends ItemView {
   }
 
   private handleApprove(vm: CardVM): void {
-    // import dynamically to avoid circular deps at module load time.
+    // Import dynamically to avoid circular deps at module load time.
     import("./wikilink-insert").then(({ buildWikilinkReplacement }) => {
       const path = this.activeFilePath;
       if (!path) return;
@@ -332,7 +336,7 @@ export class NexusApprovalView extends ItemView {
           await vault.modify(file, result.content);
           this.store.approveEdge(vm.sourceId, vm.phraseText, vm.targetId);
         } else {
-          // span drifted — re-scan and surface again after reprocess.
+          // Span drifted — re-scan and surface again after reprocess.
           this.store.removeEdge(vm.sourceId, vm.phraseText, vm.targetId);
           this.plugin.jobQueue?.forceEnqueue(path, "process");
           new Notice("Phrase moved — rescanning…");
