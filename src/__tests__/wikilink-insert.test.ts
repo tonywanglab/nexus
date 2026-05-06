@@ -68,7 +68,7 @@ describe("buildWikilinkReplacement", () => {
   describe("multiple occurrences", () => {
     it("replaces only the occurrence at the specified offsets", () => {
       const content = "neural nets first, neural nets second.";
-      // Offset points to the second "neural nets" at position 19
+      // offset points to the second "neural nets" at position 19
       const phrase = { phrase: "neural nets", startOffset: 19, endOffset: 30 };
       const result = buildWikilinkReplacement(content, phrase, "Neural Networks");
       expect(result.replaced).toBe(true);

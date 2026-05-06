@@ -8,7 +8,7 @@ import { AliasResolver } from "../resolver";
 import { ExtractedPhrase } from "../types";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// helpers
 // ---------------------------------------------------------------------------
 function makePhrase(
   phrase: string,
@@ -35,7 +35,7 @@ describe("lcsLength", () => {
   it("expects pre-normalized input (no internal case folding)", () => {
     // "Hello" vs "hello" differ at index 0, so LCS = 4 (not 5)
     expect(lcsLength("Hello", "hello")).toBe(4);
-    // Pre-normalized inputs compare correctly
+    // pre-normalized inputs compare correctly
     expect(lcsLength("hello", "hello")).toBe(5);
   });
 
@@ -75,7 +75,7 @@ describe("normalizedSimilarity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Normalization
+// normalization
 // ---------------------------------------------------------------------------
 describe("normalize", () => {
   it("lowercases and trims", () => {
@@ -128,7 +128,7 @@ describe("phraseContainsTitle", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AliasResolver
+// aliasResolver
 // ---------------------------------------------------------------------------
 describe("AliasResolver", () => {
   const resolver = new AliasResolver();
@@ -171,7 +171,7 @@ describe("AliasResolver", () => {
     const titles = ["My Note", "Other Note"];
     const edges = await resolver.resolve(phrases, titles, "folder/My Note.md");
 
-    // Should not include "My Note" as target
+    // should not include "My Note" as target
     expect(edges.every((e) => e.targetPath !== "My Note")).toBe(true);
   });
 
@@ -188,7 +188,7 @@ describe("AliasResolver", () => {
     ];
     const edges = await custom.resolve(phrases, titles, "note.md");
 
-    // With maxCandidatesPerPhrase=1, only best match per phrase
+    // with maxCandidatesPerPhrase=1, only best match per phrase
     // (dedup may still reduce further, but can't exceed 1 per phrase)
     expect(edges.length).toBeLessThanOrEqual(1);
   });
@@ -201,7 +201,7 @@ describe("AliasResolver", () => {
     const titles = ["Machine Learning"];
     const edges = await resolver.resolve(phrases, titles, "note.md");
 
-    // Only one edge to "Machine Learning" (from the better match)
+    // only one edge to "Machine Learning" (from the better match)
     const mlEdges = edges.filter((e) => e.targetPath === "Machine Learning");
     expect(mlEdges).toHaveLength(1);
   });
@@ -211,7 +211,7 @@ describe("AliasResolver", () => {
     const titles = ["x"];
     const edges = await resolver.resolve(phrases, titles, "note.md");
 
-    // Short phrases are no longer filtered here — SpanExtractor handles it
+    // short phrases are no longer filtered here — SpanExtractor handles it
     expect(edges.length).toBeGreaterThanOrEqual(0);
   });
 
@@ -229,7 +229,7 @@ describe("AliasResolver", () => {
   });
 
   it("inverted-index optimization produces same results as brute-force", async () => {
-    // Use a low threshold so we can verify the token-based filtering logic
+    // use a low threshold so we can verify the token-based filtering logic
     const lowThreshold = new AliasResolver({ similarityThreshold: 0.3 });
 
     const phrases = [
@@ -248,7 +248,7 @@ describe("AliasResolver", () => {
     const edges = await lowThreshold.resolve(phrases, titles, "notes/overview.md");
     const targets = edges.map((e) => e.targetPath);
 
-    // Phrases sharing tokens with titles should match
+    // phrases sharing tokens with titles should match
     expect(targets).toContain("Machine Learning");
     expect(targets).toContain("Data Pipeline Architecture");
     expect(targets).toContain("Gradient Descent Optimization");

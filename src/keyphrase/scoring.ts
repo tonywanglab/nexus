@@ -1,9 +1,7 @@
 import { ExtractedPhrase } from "../types";
 
-/**
- * Sort candidates by score ascending, take the top N, then min-max normalize
- * scores to [0, 1]. Lower score = more important.
- */
+// sort candidates by score ascending, take the top N, then min-max normalize
+// scores to [0, 1]. Lower score = more important.
 export function normalizeScores(
   candidates: ExtractedPhrase[],
   topN: number,

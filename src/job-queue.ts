@@ -20,13 +20,11 @@ export class JobQueue {
   private readonly debounceMs: number;
   private readonly priorityDebounceMs: number;
   private readonly cooldownMs: number;
-  /**
-   * Serialization: when onProcess is async, at most one job runs at a time.
-   * `serialRunning` is true while an async job is in flight; subsequent jobs
-   * are held in `serialQueue` and started when the in-flight job settles.
-   * Sync onProcess (unit-test mocks) leaves serialRunning=false so tests
-   * don't have to flush microtasks after fake-timer advances.
-   */
+  // serialization: when onProcess is async, at most one job runs at a time.
+  // `serialRunning` is true while an async job is in flight; subsequent jobs
+  // are held in `serialQueue` and started when the in-flight job settles.
+  // sync onProcess (unit-test mocks) leaves serialRunning=false so tests
+  // don't have to flush microtasks after fake-timer advances.
   private serialRunning = false;
   private serialQueue: QueueJob[] = [];
 
@@ -39,6 +37,9 @@ export class JobQueue {
     this.cooldownMs = options.cooldownMs ?? 2000;
   }
 
+  // schedule a job for `filePath`, debouncing repeated calls. The active file
+  // gets the shorter `priorityDebounceMs` delay; all others use `debounceMs`.
+  // jobs that fire within `cooldownMs` of the last processed time are dropped.
   enqueue(filePath: string, type: JobType): void {
     const existing = this.pending.get(filePath);
     if (existing) {
@@ -66,7 +67,7 @@ export class JobQueue {
     this.pending.set(filePath, { timer, job });
   }
 
-  /** Like enqueue but bypasses the cooldown gate — for settings-triggered bulk reprocess. */
+  //  Like enqueue but bypasses the cooldown gate — for settings-triggered bulk reprocess.
   forceEnqueue(filePath: string, type: JobType): void {
     const existing = this.pending.get(filePath);
     if (existing) clearTimeout(existing.timer);
@@ -106,14 +107,14 @@ export class JobQueue {
     const entries = [...this.pending.values()];
     for (const { timer } of entries) clearTimeout(timer);
     this.pending.clear();
-    // Cooldown is only for timer-driven `enqueue`; flush must not drop jobs.
+    // cooldown is only for timer-driven `enqueue`; flush must not drop jobs.
     for (const { job } of entries) {
       this.lastProcessed.set(job.filePath, Date.now());
       this.dispatch(job);
     }
   }
 
-  /** Cancel all pending normal-priority jobs except for the given file. */
+  //  Cancel all pending normal-priority jobs except for the given file.
   cancelNormalExcept(filePath: string): void {
     for (const [path, entry] of this.pending) {
       if (path !== filePath && entry.job.priority === "normal") {
@@ -123,11 +124,9 @@ export class JobQueue {
     }
   }
 
-  /**
-   * Run a job, serializing against any currently in-flight async job.
-   * Sync onProcess calls (e.g. test mocks) bypass the queue entirely so
-   * fake-timer tests don't need to flush microtasks.
-   */
+  // run a job, serializing against any currently in-flight async job.
+  // sync onProcess calls (e.g. test mocks) bypass the queue entirely so
+  // fake-timer tests don't need to flush microtasks.
   private dispatch(job: QueueJob): void {
     if (this.serialRunning) {
       this.serialQueue.push(job);
@@ -143,7 +142,7 @@ export class JobQueue {
       this.serialRunning = true;
       result.then(() => this.afterDispatch(), () => this.afterDispatch());
     }
-    // Sync result: serialRunning stays false — next dispatch starts immediately.
+    // sync result: serialRunning stays false — next dispatch starts immediately.
   }
 
   private afterDispatch(): void {
@@ -163,7 +162,7 @@ export class JobQueue {
         result.then(() => this.afterDispatch(), () => this.afterDispatch());
         return; // still in-flight; afterDispatch will be called when done
       }
-      // Sync result: loop to drain more jobs without microtask overhead
+      // sync result: loop to drain more jobs without microtask overhead
     }
   }
 

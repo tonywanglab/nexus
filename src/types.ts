@@ -19,10 +19,8 @@ export type NoteId = string;
 
 export type Resolver = "lcs" | "dense" | "sparse";
 
-/**
- * Legacy single-resolver tag. Retained so edges persisted before `matchedBy`
- * existed still round-trip. New code should read `matchedBy` instead.
- */
+// legacy single-resolver tag. Retained so edges persisted before `matchedBy`
+// existed still round-trip. New code should read `matchedBy` instead.
 export type MatchType = "deterministic" | "stochastic" | "sparse-feature" | "both" | "mixed";
 
 export interface CandidateEdge {
@@ -32,15 +30,15 @@ export interface CandidateEdge {
   targetPath: string;
   targetId?: NoteId;
   similarity: number;
-  /** Set of resolvers that contributed to this edge. */
+  //  Set of resolvers that contributed to this edge.
   matchedBy?: Resolver[];
-  /** Per-resolver scores. Populated when the corresponding resolver contributed. */
+  //  Per-resolver scores. Populated when the corresponding resolver contributed.
   lcsSimilarity?: number;
   denseSimilarity?: number;
   sparseSimilarity?: number;
   approved?: boolean;
   matchType?: MatchType;
-  /** Top-4 labeled SAE features per side. Populated only when sparse resolver contributed. */
+  //  Top-4 labeled SAE features per side. Populated only when sparse resolver contributed.
   sparseFeatures?: {
     phraseFeatures: { idx: number; value: number; label: string }[];
     titleFeatures:  { idx: number; value: number; label: string }[];
@@ -89,19 +87,17 @@ export function createEmptyPersistedState(): PersistedState {
   };
 }
 
-/**
- * Canonicalizes a phrase string for denial/approval key matching.
- * lowercase → trim → collapse internal whitespace.
- */
+// canonicalizes a phrase string for denial/approval key matching.
+// lowercase → trim → collapse internal whitespace.
 export function phraseKey(phrase: string): string {
   return phrase.toLowerCase().trim().replace(/\s+/g, " ");
 }
 
 export interface VaultContext {
-  /** Existing note titles (basenames without .md), original casing. */
+  //  Existing note titles (basenames without .md), original casing.
   noteTitles?: string[];
-  /** Per-term document frequency map (term → number of documents containing it). */
+  //  Per-term document frequency map (term → number of documents containing it).
   documentFrequencies?: Map<string, number>;
-  /** Total number of documents in the vault. */
+  //  Total number of documents in the vault.
   totalDocuments?: number;
 }
