@@ -280,12 +280,7 @@ QueueJob          { filePath, type, priority, enqueuedAt }
   (×1.5, clamped) compresses the top of the ranking, so ordering among several strong matches for a
   short phrase like "data" is effectively arbitrary.
 
-## Thesis
-
-Tony Wang. *Nexus: Local-First Automatic Link Discovery for Obsidian.* CPSC 4900 Senior Thesis,
-Department of Computer Science, Yale University, April 2026. Advisor: Timos Antonopoulos.
-
-Built on:
+## References
 
 - Campos et al., ["YAKE! Keyword Extraction from Single Documents Using Multiple Local Features"](https://doi.org/10.1016/j.ins.2019.09.013), *Information Sciences* 509 (2020)
 - Speer, Chin & Havasi, ["ConceptNet 5.5: An Open Multilingual Graph of General Knowledge"](https://arxiv.org/abs/1612.03975), AAAI 2017
