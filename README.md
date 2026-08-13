@@ -287,7 +287,3 @@ QueueJob          { filePath, type, priority, enqueuedAt }
 - Makhzani & Frey, ["k-Sparse Autoencoders"](https://arxiv.org/abs/1312.5663), 2013
 - Bricken et al., ["Towards Monosemanticity: Decomposing Language Models with Dictionary Learning"](https://transformer-circuits.pub/2023/monosemantic-features), Transformer Circuits Thread, 2023
 - Miller, "WordNet: A Lexical Database for English", *CACM* 38.11 (1995)
-
-## License
-
-MIT
