@@ -3,21 +3,19 @@ import { preprocess, Sentence, Token } from "./preprocessing";
 import { normalizeScores } from "./scoring";
 import { STOPWORDS } from "./stopwords";
 
-/**
- * Configuration for the YAKE-lite keyphrase extractor.
- */
+// configuration for the YAKE-lite keyphrase extractor.
 export interface YakeLiteOptions {
-  /** Maximum n-gram size (default 3: unigrams, bigrams, trigrams). */
+  //  Maximum n-gram size (default 3: unigrams, bigrams, trigrams).
   maxNgramSize?: number;
-  /** Co-occurrence window size for relatedness (default 3). */
+  //  Co-occurrence window size for relatedness (default 3).
   windowSize?: number;
-  /** Maximum number of phrases to return (default 20). */
+  //  Maximum number of phrases to return (default 20).
   topN?: number;
-  /** Frequency dampening factor α (default 0.5). */
+  //  Frequency dampening factor α (default 0.5).
   frequencyDampening?: number;
-  /** Boost applied when a phrase matches an existing note title (default 5). */
+  //  Boost applied when a phrase matches an existing note title (default 5).
   noteMatchBoost?: number;
-  /** Boost applied to noun-phrase-shaped n-grams (default 4). */
+  //  Boost applied to noun-phrase-shaped n-grams (default 4).
   nounPhraseBoost?: number;
 }
 
@@ -30,27 +28,26 @@ const DEFAULTS: Required<YakeLiteOptions> = {
   nounPhraseBoost: 4,
 };
 
-/** Per-term statistics collected during the first pass. */
+//  Per-term statistics collected during the first pass.
 interface TermStats {
-  /** Total term frequency across all sentences. */
+  //  Total term frequency across all sentences.
   tf: number;
-  /** Number of times the term appears with first letter uppercase. */
+  //  Number of times the term appears with first letter uppercase.
   tfUpper: number;
-  /** Number of times the term appears in ALL CAPS. */
+  //  Number of times the term appears in ALL CAPS.
   tfAllCaps: number;
-  /** Sentence indices where the term occurs. */
+  //  Sentence indices where the term occurs.
   sentenceIndices: number[];
-  /** Left-context distinct words (within window). */
+  //  Left-context distinct words (within window).
   leftContext: Set<string>;
-  /** Right-context distinct words (within window). */
+  //  Right-context distinct words (within window).
   rightContext: Set<string>;
-  /** Total left co-occurrences. */
+  //  Total left co-occurrences.
   leftTotal: number;
-  /** Total right co-occurrences. */
+  //  Total right co-occurrences.
   rightTotal: number;
 }
 
-// ── Lightweight POS heuristics (suffix-based) ─────────────────
 
 const NOUN_SUFFIXES = [
   "tion", "sion", "ment", "ness", "ity", "ence", "ance", "ism", "ist",
@@ -74,17 +71,17 @@ type PosGuess = "noun" | "adj" | "verb" | "adverb" | "unknown";
 function guessPOS(word: string): PosGuess {
   const w = word.toLowerCase();
 
-  // Short words (<=3 chars) — don't guess by suffix
+  // short words (<=3 chars) — don't guess by suffix
   if (w.length <= 3) return "unknown";
 
-  // Adverb check first (before adj, since "ally" ends in "ly")
+  // adverb check first (before adj, since "ally" ends in "ly")
   if (w.endsWith(ADVERB_SUFFIX) && w.length > 4) return "adverb";
 
-  // Gerunds/present participles ending in -ing: treat as noun (gerund) unless
+  // gerunds/present participles ending in -ing: treat as noun (gerund) unless
   // the word is very short, since "computing", "learning", etc. are noun-like
   if (w.endsWith("ing") && w.length > 5) return "noun";
 
-  // Check verb suffixes before noun/adj (since some overlap)
+  // check verb suffixes before noun/adj (since some overlap)
   for (const s of VERB_SUFFIXES) {
     if (w.endsWith(s) && w.length > s.length + 2) return "verb";
   }
@@ -97,7 +94,7 @@ function guessPOS(word: string): PosGuess {
     if (w.endsWith(s)) return "adj";
   }
 
-  // Capitalized words in the middle of a sentence are likely proper nouns
+  // capitalized words in the middle of a sentence are likely proper nouns
   if (word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
     return "noun";
   }
@@ -105,11 +102,9 @@ function guessPOS(word: string): PosGuess {
   return "unknown";
 }
 
-/**
- * Check if an n-gram looks like a noun phrase: (adj|noun|unknown)* noun/unknown
- * where the head (last non-stopword) must be noun-like or unknown,
- * and no word is a verb or adverb.
- */
+// check if an n-gram looks like a noun phrase: (adj|noun|unknown)* noun/unknown
+// where the head (last non-stopword) must be noun-like or unknown,
+// and no word is a verb or adverb.
 function isNounPhrase(words: string[]): boolean {
   if (words.length === 0) return false;
 
@@ -118,17 +113,15 @@ function isNounPhrase(words: string[]): boolean {
     if (pos === "verb" || pos === "adverb") return false;
   }
 
-  // Head word (last) should be noun or unknown (not adj-only)
+  // head word (last) should be noun or unknown (not adj-only)
   const headPos = guessPOS(words[words.length - 1]);
   return headPos === "noun" || headPos === "unknown";
 }
 
-/**
- * Lightweight YAKE keyphrase extractor tailored for Obsidian notes.
- *
- * Weights positional and contextual cues over frequency.
- * All processing is local — no external APIs.
- */
+// lightweight YAKE keyphrase extractor tailored for Obsidian notes.
+//
+// weights positional and contextual cues over frequency.
+// all processing is local — no external APIs.
 export class YakeLite {
   private opts: Required<YakeLiteOptions>;
 
@@ -136,15 +129,13 @@ export class YakeLite {
     this.opts = { ...DEFAULTS, ...options };
   }
 
-  /**
-   * Extract keyphrases from Obsidian note content.
-   * Returns phrases sorted by score (lower = more important),
-   * with offsets pointing into the original content.
-   *
-   * When `vaultContext` is provided, TF-IDF distinctiveness and
-   * existing-note-match heuristics are applied. Structural boosts
-   * (title, heading, bold) are always applied.
-   */
+  // extract keyphrases from Obsidian note content.
+  // returns phrases sorted by score (lower = more important),
+  // with offsets pointing into the original content.
+  //
+  // when `vaultContext` is provided, TF-IDF distinctiveness and
+  // existing-note-match heuristics are applied. Structural boosts
+  // (title, heading, bold) are always applied.
   extract(content: string, vaultContext?: VaultContext): ExtractedPhrase[] {
     if (!content || !content.trim()) return [];
 
@@ -223,7 +214,6 @@ export class YakeLite {
         s.tf++;
         s.sentenceIndices.push(sentence.index);
 
-        // Casing stats
         if (token.original.length > 0) {
           const firstChar = token.original[0];
           if (firstChar === firstChar.toUpperCase() && firstChar !== firstChar.toLowerCase()) {
@@ -236,7 +226,7 @@ export class YakeLite {
           }
         }
 
-        // Co-occurrence context (within window, among non-stopword tokens)
+        // co-occurrence context (within window, among non-stopword tokens)
         for (let w = 1; w <= this.opts.windowSize; w++) {
           if (i - w >= 0) {
             s.leftContext.add(tokens[i - w].lower);
@@ -258,7 +248,7 @@ export class YakeLite {
   private computeTermScores(stats: Map<string, TermStats>): Map<string, number> {
     const scores = new Map<string, number>();
 
-    // Aggregate stats for frequency normalization
+    // aggregate stats for frequency normalization
     const allTFs: number[] = [];
     let maxTF = 0;
     for (const s of stats.values()) {
@@ -271,32 +261,32 @@ export class YakeLite {
     );
 
     for (const [term, s] of stats) {
-      // Feature 1: Casing
+      // feature 1: Casing
       // TF_C = count of capitalized occurrences, TF_U = count of all-caps
       const tfCasing = Math.max(s.tfUpper, s.tfAllCaps);
       const casing = tfCasing / (1 + Math.log2(1 + s.tf));
 
-      // Feature 2: Position
-      // Lower score = earlier = more important
+      // feature 2: Position
+      // lower score = earlier = more important
       const median = this.median(s.sentenceIndices);
       const position = Math.log2(3 + median);
 
-      // Feature 3: Frequency (dampened by α)
+      // feature 3: Frequency (dampened by α)
       const frequency = s.tf / (meanTF + stdTF + 1);
 
-      // Feature 4: Relatedness
-      // Words with diverse context (many distinct neighbors relative to total) are stopword-ish
+      // feature 4: Relatedness
+      // words with diverse context (many distinct neighbors relative to total) are stopword-ish
       const wdl = s.leftContext.size;
       const wil = Math.max(s.leftTotal, 1);
       const wdr = s.rightContext.size;
       const wir = Math.max(s.rightTotal, 1);
       const relatedness = 1 + (wdl / wil + wdr / wir) * (s.tf / maxTF);
 
-      // Feature 5: DifSentence
+      // feature 5: DifSentence
       const uniqueSentences = new Set(s.sentenceIndices).size;
       const difSentence = uniqueSentences / s.tf;
 
-      // Combined score: H = (Relatedness × Position) /
+      // combined score: H = (Relatedness × Position) /
       //   (Casing + α×Frequency/Relatedness + DifSentence/Relatedness)
       const α = this.opts.frequencyDampening;
       const denominator = casing + (α * frequency / relatedness) + (difSentence / relatedness);
@@ -319,10 +309,10 @@ export class YakeLite {
   ): ExtractedPhrase[] {
     const candidates: Map<string, ExtractedPhrase> = new Map();
 
-    // Pre-compute lowercased note titles for matching
+    // pre-compute lowercased note titles for matching
     const noteTitlesLower = vaultContext?.noteTitles?.map((t) => t.toLowerCase()) ?? [];
 
-    // Pre-compute max TF-IDF for normalization
+    // pre-compute max TF-IDF for normalization
     let maxTfIdf = 0;
     const tfidfCache = new Map<string, number>();
     if (vaultContext?.documentFrequencies && vaultContext.totalDocuments) {
@@ -344,9 +334,9 @@ export class YakeLite {
         for (let i = 0; i <= tokens.length - n; i++) {
           const gram = tokens.slice(i, i + n);
 
-          // Skip if any constituent is a stopword (except as internal words in n>2)
-          // For unigrams: skip stopwords entirely
-          // For n-grams: first and last word must not be stopwords
+          // skip if any constituent is a stopword (except as internal words in n>2)
+          // for unigrams: skip stopwords entirely
+          // for n-grams: first and last word must not be stopwords
           if (STOPWORDS.has(gram[0].lower) || STOPWORDS.has(gram[gram.length - 1].lower)) {
             continue;
           }
@@ -354,13 +344,13 @@ export class YakeLite {
           const phrase = gram.map((t) => t.original).join(" ");
           const phraseLower = phrase.toLowerCase();
 
-          // Skip single-character tokens
+          // skip single-character tokens
           if (n === 1 && gram[0].lower.length <= 1) continue;
 
           const startOffset = gram[0].startOffset;
           const endOffset = gram[gram.length - 1].endOffset;
 
-          // Compute n-gram score using geometric-mean normalization so
+          // compute n-gram score using geometric-mean normalization so
           // multi-word phrases compete fairly with unigrams:
           //   S(kw) = geomean(H_i) / (TF_kw × (1 + mean(H_i)))
           const constituentScores = gram
@@ -374,7 +364,6 @@ export class YakeLite {
           const geomean = Math.pow(product, 1 / k);
           const mean = constituentScores.reduce((a, b) => a + b, 0) / k;
 
-          // Count n-gram frequency across all sentences
           const ngramTF = this.countNgramFrequency(sentences, gram);
 
           let rawScore = geomean / (ngramTF * (1 + mean));
@@ -396,7 +385,7 @@ export class YakeLite {
               const v = tfidfCache.get(t.lower) ?? 0;
               if (v > phraseMaxTfIdf) phraseMaxTfIdf = v;
             }
-            // Normalize to [0, 1] range, then scale to a reasonable boost
+            // normalize to [0, 1] range, then scale to a reasonable boost
             totalBoost += (phraseMaxTfIdf / maxTfIdf) * 2;
           }
 
@@ -411,10 +400,8 @@ export class YakeLite {
             totalBoost += this.opts.nounPhraseBoost;
           }
 
-          // Apply boosts: lower score = more important
           const score = rawScore / (1 + totalBoost);
 
-          // Keep best (lowest) score for each phrase
           const existing = candidates.get(phraseLower);
           if (!existing || score < existing.score) {
             candidates.set(phraseLower, {
@@ -449,26 +436,24 @@ export class YakeLite {
 
   // ── Deduplication ──────────────────────────────────────────
 
-  /**
-   * Remove candidates whose spans are exactly contained within a
-   * higher-scoring longer phrase, or that exactly contain a higher-scoring
-   * shorter phrase at the same position. Prefers longer phrases when
-   * scores are close, to surface multi-word keyphrases.
-   */
+  // remove candidates whose spans are exactly contained within a
+  // higher-scoring longer phrase, or that exactly contain a higher-scoring
+  // shorter phrase at the same position. Prefers longer phrases when
+  // scores are close, to surface multi-word keyphrases.
   private deduplicateByOffset(candidates: ExtractedPhrase[]): ExtractedPhrase[] {
-    // Sort by score ascending (best first), then by phrase length descending
+    // sort by score ascending (best first), then by phrase length descending
     // (prefer longer phrases at similar scores)
     const sorted = [...candidates].sort((a, b) => {
       const scoreDiff = a.score - b.score;
       if (Math.abs(scoreDiff) > 1e-6) return scoreDiff;
-      // Tie-break: longer phrases first
+      // tie-break: longer phrases first
       return b.phrase.length - a.phrase.length;
     });
 
     const result: ExtractedPhrase[] = [];
 
     for (const candidate of sorted) {
-      // Only skip if an already-accepted candidate covers the EXACT same span
+      // only skip if an already-accepted candidate covers the EXACT same span
       const exactDuplicate = result.some(
         (r) =>
           r.startOffset === candidate.startOffset &&

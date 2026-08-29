@@ -1,39 +1,37 @@
-/**
- * K-sparse (dictionary-learning) autoencoder with explicit TopK sparsity control.
- *
- * Architecture (matches the reference article, modern SAE formulation):
- *
- *   z = TopK(ReLU(W_enc · (x - b_pre) + b_enc), k)   // exactly k non-zeros
- *   x̂ = W_dec · z + b_dec + b_pre                    // dictionary reconstruction
- *
- * No L1 / KL soft regularization - sparsity is enforced structurally. The decoder
- * matrix is a learned dictionary: each of its d_hidden columns is a unit-norm
- * "atom", and reconstructions are k-sparse linear combinations of atoms.
- *
- * This file contains the forward-only runtime (pure Float32Array math, no deps).
- * Training lives in sae-trainer.ts and depends on @tensorflow/tfjs-node.
- */
+// k-sparse (dictionary-learning) autoencoder with explicit TopK sparsity control.
+//
+// architecture (matches the reference article, modern SAE formulation):
+//
+//   z = TopK(ReLU(W_enc · (x - b_pre) + b_enc), k)   // exactly k non-zeros
+//   x̂ = W_dec · z + b_dec + b_pre                    // dictionary reconstruction
+//
+// no L1 / KL soft regularization - sparsity is enforced structurally. The decoder
+// matrix is a learned dictionary: each of its d_hidden columns is a unit-norm
+// "atom", and reconstructions are k-sparse linear combinations of atoms.
+//
+// this file contains the forward-only runtime (pure Float32Array math, no deps).
+// training lives in sae-trainer.ts and depends on @tensorflow/tfjs-node.
 
 export interface SAEWeights {
   dModel: number;
   dHidden: number;
   k: number;
-  /** Encoder weights, shape [dHidden, dModel] row-major. */
+  //  Encoder weights, shape [dHidden, dModel] row-major.
   wEnc: Float32Array;
-  /** Encoder bias, length dHidden. */
+  //  Encoder bias, length dHidden.
   bEnc: Float32Array;
-  /** Pre-bias (centering vector), length dModel. */
+  //  Pre-bias (centering vector), length dModel.
   bPre: Float32Array;
-  /** Decoder weights, shape [dModel, dHidden] row-major. Columns are dictionary atoms. */
+  //  Decoder weights, shape [dModel, dHidden] row-major. Columns are dictionary atoms.
   wDec: Float32Array;
-  /** Decoder bias, length dModel. */
+  //  Decoder bias, length dModel.
   bDec: Float32Array;
 }
 
 export interface SparseEncoding {
-  /** Length k, the indices of the active features (unsorted). */
+  //  Length k, the indices of the active features (unsorted).
   indices: Int32Array;
-  /** Length k, the values at those indices (in matching order). */
+  //  Length k, the values at those indices (in matching order).
   values: Float32Array;
 }
 
@@ -86,10 +84,6 @@ export class SparseAutoencoder {
     this.bDec = bDec;
   }
 
-  /**
-   * Encode a single input vector into a k-sparse activation of length dHidden.
-   * Exactly `k` entries are non-zero; everything else is 0.
-   */
   encode(x: Float32Array): Float32Array {
     if (x.length !== this.dModel) {
       throw new Error(`Input length ${x.length} != dModel ${this.dModel}`);
@@ -119,10 +113,8 @@ export class SparseAutoencoder {
     return sparse;
   }
 
-  /**
-   * Compact k-sparse encoding: returns the k active indices and their values.
-   * `encode(x)` is equivalent to scattering these into a zero Float32Array.
-   */
+  // compact k-sparse encoding: returns the k active indices and their values.
+  // `encode(x)` is equivalent to scattering these into a zero Float32Array.
   encodeSparse(x: Float32Array): SparseEncoding {
     if (x.length !== this.dModel) {
       throw new Error(`Input length ${x.length} != dModel ${this.dModel}`);
@@ -155,10 +147,8 @@ export class SparseAutoencoder {
     return out;
   }
 
-  /**
-   * Dictionary reconstruction: x̂ = W_dec · z + b_dec + b_pre.
-   * Equivalent to summing the active atoms weighted by their coefficients.
-   */
+  // dictionary reconstruction: x̂ = W_dec · z + b_dec + b_pre.
+  // equivalent to summing the active atoms weighted by their coefficients.
   decode(z: Float32Array): Float32Array {
     if (z.length !== this.dHidden) {
       throw new Error(`z length ${z.length} != dHidden ${this.dHidden}`);
@@ -182,11 +172,9 @@ export class SparseAutoencoder {
     return { sparse, reconstruction };
   }
 
-  /**
-   * Project each dictionary atom (decoder column) to unit L2 norm in place.
-   * Prevents the encoder-decoder scale-cheating loophole and keeps feature
-   * magnitudes interpretable.
-   */
+  // project each dictionary atom (decoder column) to unit L2 norm in place.
+  // prevents the encoder-decoder scale-cheating loophole and keeps feature
+  // magnitudes interpretable.
   normalizeDecoder(): void {
     const { dModel, dHidden, wDec } = this;
     for (let j = 0; j < dHidden; j++) {
@@ -204,13 +192,11 @@ export class SparseAutoencoder {
     }
   }
 
-  /**
-   * Serialize to a compact binary blob:
-   *   4 bytes: magic "SAE1"
-   *   4 bytes: header JSON length (u32 LE)
-   *   N bytes: header JSON `{dModel, dHidden, k}`
-   *   then packed Float32 LE: wEnc, bEnc, bPre, wDec, bDec
-   */
+  // serialize to a compact binary blob:
+  //   4 bytes: magic "SAE1"
+  //   4 bytes: header JSON length (u32 LE)
+  //   N bytes: header JSON `{dModel, dHidden, k}`
+  //   then packed Float32 LE: wEnc, bEnc, bPre, wDec, bDec
   serialize(): Uint8Array {
     return SparseAutoencoder.serialize({
       dModel: this.dModel,
@@ -227,12 +213,12 @@ export class SparseAutoencoder {
   static serialize(w: SAEWeights): Uint8Array {
     const header = JSON.stringify({ dModel: w.dModel, dHidden: w.dHidden, k: w.k });
     const rawHeader = new TextEncoder().encode(header);
-    // Pad the header so the Float32 section starts on a 4-byte boundary
+    // pad the header so the Float32 section starts on a 4-byte boundary
     // (8 bytes magic+length + headerLen must be divisible by 4).
     const padding = (4 - ((8 + rawHeader.length) % 4)) % 4;
     const headerBytes = new Uint8Array(rawHeader.length + padding);
     headerBytes.set(rawHeader);
-    // Pad with spaces so the JSON remains valid if re-parsed as a string.
+    // pad with spaces so the JSON remains valid if re-parsed as a string.
     for (let i = rawHeader.length; i < headerBytes.length; i++) headerBytes[i] = 0x20;
 
     const totalFloats =
@@ -284,7 +270,7 @@ export class SparseAutoencoder {
     };
 
     let offset = byteOffset + 8 + headerLen;
-    // Float32Array requires 4-byte alignment; copy if offset misaligns.
+    // float32Array requires 4-byte alignment; copy if offset misaligns.
     const readFloats = (n: number): Float32Array => {
       let out: Float32Array;
       if (offset % 4 === 0) {
@@ -307,10 +293,8 @@ export class SparseAutoencoder {
     return new SparseAutoencoder({ dModel, dHidden, k, wEnc, bEnc, bPre, wDec, bDec });
   }
 
-  /**
-   * Random Gaussian init, then project decoder columns to unit norm.
-   * Used by the training script; runtime always deserializes trained weights.
-   */
+  // random Gaussian init, then project decoder columns to unit norm.
+  // used by the training script; runtime always deserializes trained weights.
   static randomInit(
     dModel: number,
     dHidden: number,
@@ -319,7 +303,7 @@ export class SparseAutoencoder {
   ): SparseAutoencoder {
     const rng = mulberry32(seed);
     const gauss = (): number => {
-      // Box-Muller, discard the second value for simplicity.
+      // box-Muller, discard the second value for simplicity.
       let u1 = rng();
       if (u1 < 1e-12) u1 = 1e-12;
       const u2 = rng();
@@ -349,10 +333,8 @@ export class SparseAutoencoder {
   }
 }
 
-/**
- * Min-heap based top-k selection. Returns indices+values (unsorted).
- * Runs in O(n log k) with stable behavior for ties (first-seen wins).
- */
+// min-heap based top-k selection. Returns indices+values (unsorted).
+// runs in O(n log k) with stable behavior for ties (first-seen wins).
 export function topK(values: Float32Array, k: number): SparseEncoding {
   const n = values.length;
   if (k > n) throw new Error(`topK: k=${k} > n=${n}`);
@@ -379,10 +361,8 @@ export function topK(values: Float32Array, k: number): SparseEncoding {
   return { indices: heapIdx, values: heapVals };
 }
 
-/**
- * Returns the top-n entries of an existing SparseEncoding by activation value.
- * Preserves Int32Array/Float32Array types. Throws if n > enc.indices.length.
- */
+// returns the top-n entries of an existing SparseEncoding by activation value.
+// preserves Int32Array/Float32Array types. Throws if n > enc.indices.length.
 export function topNOf(enc: SparseEncoding, n: number): SparseEncoding {
   const k = enc.indices.length;
   if (n > k) throw new Error(`topNOf: n=${n} > k=${k}`);
@@ -416,7 +396,7 @@ function siftDown(vals: Float32Array, idx: Int32Array, start: number, n: number)
   }
 }
 
-/** Deterministic 32-bit PRNG for reproducible random init. */
+//  Deterministic 32-bit PRNG for reproducible random init.
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return function (): number {

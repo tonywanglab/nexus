@@ -1,11 +1,9 @@
-/**
- * Smoke test for SAETrainer: on a tiny synthetic dataset of sparse concept
- * combinations (mirroring the article's `generate_structured_data`), a handful
- * of gradient steps should reduce MSE and L0 should stay at `k`.
- *
- * This test imports @tensorflow/tfjs-node which is a heavy native dependency.
- * We gate on availability so CI without tfjs-node just skips cleanly.
- */
+// smoke test for SAETrainer: on a tiny synthetic dataset of sparse concept
+// combinations (mirroring the article's `generate_structured_data`), a handful
+// of gradient steps should reduce MSE and L0 should stay at `k`.
+//
+// this test imports @tensorflow/tfjs-node which is a heavy native dependency.
+// we gate on availability so CI without tfjs-node just skips cleanly.
 
 import { SparseAutoencoder } from "../resolver/sae";
 
@@ -31,7 +29,7 @@ suite("SAETrainer", () => {
   const numSamples = 512;
   const seed = 0xDEADBEEF;
 
-  /** Article-style synthetic data: each sample is a sparse mix of 2 concepts. */
+  //  Article-style synthetic data: each sample is a sparse mix of 2 concepts.
   function generateStructuredData(): Float32Array[] {
     const rng = seededRandom(seed);
     const concepts: Float32Array[] = [];
@@ -82,7 +80,7 @@ suite("SAETrainer", () => {
     const initial = SparseAutoencoder.randomInit(dModel, dHidden, k, seed);
     const trainer = new SAETrainer!(initial, { learningRate: 1e-2 });
 
-    // Warm start: pre-bias to sample mean
+    // warm start: pre-bias to sample mean
     const mean = new Float32Array(dModel);
     for (const s of samples) for (let d = 0; d < dModel; d++) mean[d] += s[d];
     for (let d = 0; d < dModel; d++) mean[d] /= samples.length;
@@ -133,7 +131,7 @@ suite("SAETrainer", () => {
       epochL0s.push(l0Sum / count);
     }
 
-    // L0 is bounded above by k (ReLU zeros non-positive features; we only
+    // l0 is bounded above by k (ReLU zeros non-positive features; we only
     // count positive selected activations). At steady state L0 is near k.
     for (const l0 of epochL0s) {
       expect(l0).toBeLessThanOrEqual(k);
@@ -142,7 +140,7 @@ suite("SAETrainer", () => {
     // MSE must decrease substantially (last epoch << first).
     expect(epochLosses[epochLosses.length - 1]).toBeLessThan(epochLosses[0] * 0.5);
 
-    // Exported SAE must never exceed k non-zeros per input (TopK guarantees
+    // exported SAE must never exceed k non-zeros per input (TopK guarantees
     // this structurally). In practice on trained weights it's exactly k.
     const exported = trainer.exportSAE();
     const probe = samples[0];
@@ -151,7 +149,7 @@ suite("SAETrainer", () => {
     for (let i = 0; i < enc.length; i++) if (enc[i] !== 0) nonzero++;
     expect(nonzero).toBeLessThanOrEqual(k);
 
-    // Decoder columns should be ~unit norm after training.
+    // decoder columns should be ~unit norm after training.
     for (let j = 0; j < dHidden; j++) {
       let sumSq = 0;
       for (let i = 0; i < dModel; i++) {

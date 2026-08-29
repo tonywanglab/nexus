@@ -1,7 +1,7 @@
 import { SAEFeatureLabels } from "../resolver/sae-feature-labels";
 import { SparseEncoding } from "../resolver/sae";
 
-// Mock the JSON module so tests don't depend on the real asset file.
+// mock the JSON module so tests don't depend on the real asset file.
 jest.mock("../../assets/sae-feature-labels-v2.json", () => ({
   dHidden: 6,
   vocabSize: 10,
@@ -83,7 +83,7 @@ describe("SAEFeatureLabels", () => {
     });
 
     it("degrades gracefully when fewer than 4 live features are active", () => {
-      // Only feature 0 is active and live
+      // only feature 0 is active and live
       const enc = makeEncoding([[0, 1.0], [2, 0.9], [4, 0.8]]);
       const result = fl.pickTop4Labeled(enc);
       expect(result.indices).toEqual([0]);
@@ -109,11 +109,11 @@ describe("SAEFeatureLabels", () => {
     });
 
     it("returns more than 4 features when > 4 live features are active", () => {
-      // Hypothetical 8-feature encoding — but our mock only has 6 features.
-      // Use all 4 live features (indices 0,1,3,5) plus both dead ones.
+      // hypothetical 8-feature encoding — but our mock only has 6 features.
+      // use all 4 live features (indices 0,1,3,5) plus both dead ones.
       const enc = makeEncoding([[0, 0.9], [1, 0.8], [3, 0.7], [5, 0.6], [2, 0.5], [4, 0.4]]);
       const result = fl.pickAllLabeled(enc);
-      // All 4 live features are returned (no 4-cap)
+      // all 4 live features are returned (no 4-cap)
       expect(result.indices.length).toBe(4);
       expect(result.indices).toEqual([0, 1, 3, 5]);
     });

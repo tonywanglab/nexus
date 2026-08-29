@@ -14,16 +14,14 @@ export interface ReconcileResult {
 }
 
 export interface NoteRegistryExtras {
-  /** Optional per-id byte size carried over from the previous session (used for rename reattach). */
+  //  Optional per-id byte size carried over from the previous session (used for rename reattach).
   lastSeenSize?: Record<NoteId, number>;
 }
 
-/**
- * Maintains the bijective map between note file paths and stable ids.
- * Ids survive renames; paths are the mutable side.
- *
- * No event emission — callers orchestrate store updates after calling registry mutators.
- */
+// maintains the bijective map between note file paths and stable ids.
+// ids survive renames; paths are the mutable side.
+//
+// no event emission — callers orchestrate store updates after calling registry mutators.
 export class NoteRegistry {
   private idToMeta = new Map<NoteId, NoteMeta>();
   private pathToId = new Map<string, NoteId>();
@@ -119,11 +117,9 @@ export class NoteRegistry {
     return out;
   }
 
-  /**
-   * Diffs the vault against persisted state. Mints ids for new paths, attempts
-   * best-effort reattach of orphaned ids by size-match (exactly one candidate),
-   * drops the rest.
-   */
+  // diffs the vault against persisted state. Mints ids for new paths, attempts
+  // best-effort reattach of orphaned ids by size-match (exactly one candidate),
+  // drops the rest.
   reconcile(files: VaultFileSnapshot[]): ReconcileResult {
     const result: ReconcileResult = { added: [], reattached: [], dropped: [] };
 
@@ -135,7 +131,7 @@ export class NoteRegistry {
 
     const unclaimedFiles = files.filter((f) => !this.pathToId.has(f.path));
 
-    // Best-effort reattach: for each orphan, find unclaimed files matching its last-seen size.
+    // best-effort reattach: for each orphan, find unclaimed files matching its last-seen size.
     const claimedByReattach = new Set<string>();
     for (const id of orphanIds) {
       const size = this.lastSeenSize.get(id);
@@ -156,7 +152,7 @@ export class NoteRegistry {
       }
     }
 
-    // Drop orphans that weren't reattached.
+    // drop orphans that weren't reattached.
     for (const id of orphanIds) {
       if (result.reattached.some((r) => r.id === id)) continue;
       const meta = this.idToMeta.get(id)!;
@@ -166,7 +162,7 @@ export class NoteRegistry {
       result.dropped.push(id);
     }
 
-    // Mint ids for still-unclaimed files.
+    // mint ids for still-unclaimed files.
     for (const f of unclaimedFiles) {
       if (claimedByReattach.has(f.path)) continue;
       const id = this.ensureId(f.path, f.mtime, f.size);
