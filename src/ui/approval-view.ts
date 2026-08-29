@@ -273,7 +273,7 @@ export class NexusApprovalView extends ItemView {
   ): void {
     // Collapse the phrase/title payloads into the features that fire on both
     // sides — the interpretable "why these two match" signal. Rank by pVal*tVal
-    // (the feature's literal contribution to sparseCosine), and cap at 2 chips.
+    // (the feature's literal contribution to sparseCosine), and cap at 3 chips.
     const featureLabels = (this.plugin as any).featureLabels;
     const phraseByIdx = new Map<number, { value: number; label: string }>();
     for (const f of sparseFeatures.phraseFeatures) {
@@ -288,7 +288,7 @@ export class NexusApprovalView extends ItemView {
     }
     if (shared.length === 0) return;
     shared.sort((a, b) => b.score - a.score);
-    const top = shared.slice(0, 2);
+    const top = shared.slice(0, 3);
 
     const el = card.createEl("div", { cls: "nexus-sparse-features" });
     const chips = el.createEl("div", { cls: "nexus-sparse-chips" });
