@@ -1,4 +1,4 @@
-import labels from "../../assets/sae-feature-labels-v2.json";
+import labels from "../../assets/sae-feature-labels-v3.json";
 import { SparseEncoding } from "./sae";
 
 export interface FeatureLabel { candidates: string[]; scores: number[]; topTerms?: string[]; }
@@ -37,8 +37,9 @@ export class SAEFeatureLabels {
   /** Replace labels from a parsed sae-feature-labels.json object. */
   loadFromJSON(data: { labels: FeatureLabel[] }): void {
     const empty = (): FeatureLabel => ({ candidates: [], scores: [] });
-    this._labels = data.labels.slice(0, this._labels.length);
-    while (this._labels.length < this._labels.length) this._labels.push(empty());
+    const target = this._labels.length;
+    this._labels = data.labels.slice(0, target);
+    while (this._labels.length < target) this._labels.push(empty());
   }
 
   /** Create an instance from a parsed sae-feature-labels.json without the static default. */
